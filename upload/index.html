@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div class="pageloader" id="pageloader"><div class="pageloader-spinner"></div></div>
+
   <!-- password gate -->
   <div class="gate" id="gate">
     <div class="gate-card">
@@ -92,6 +94,13 @@
     </section>
   </main>
 
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      const el = document.getElementById('pageloader');
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 400);
+    });
+  </script>
   <script type="module" src="main.js"></script>
 </body>
 </html>

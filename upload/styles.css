@@ -336,6 +336,39 @@ body {
    Password Gate
    ═══════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════
+   Page Loader
+   ═══════════════════════════════════════════════════ */
+
+.pageloader {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top, #202020 0, #090909 45%, #050505 100%);
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+
+.pageloader-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(9, 144, 247, 0.12);
+  border-top-color: #79fbf7;
+  border-radius: 50%;
+  animation: loaderSpin 0.7s linear infinite;
+}
+
+@keyframes loaderSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ═══════════════════════════════════════════════════
+   Password Gate
+   ═══════════════════════════════════════════════════ */
+
 .gate {
   position: fixed;
   inset: 0;

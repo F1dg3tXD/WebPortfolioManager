@@ -20,6 +20,8 @@
   <meta content="#0990f7" data-react-helmet="true" name="theme-color" />
 </head>
 <body>
+  <div class="pageloader" id="pageloader"><div class="pageloader-spinner"></div></div>
+
   <div class="bg-orb bg-orb-1"></div>
   <div class="bg-orb bg-orb-2"></div>
   <div class="bg-orb bg-orb-3"></div>
@@ -150,6 +152,12 @@
     });
 
     loadGallery();
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const el = document.getElementById('pageloader');
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 400);
+    });
   </script>
 </body>
 </html>
