@@ -28,7 +28,7 @@
 
   <nav class="root-header-nav">
     <span class="root-nav-btn root-nav-btn--active">Personal</span>
-    <a href="/profesional" class="root-nav-btn">Professional</a>
+    <a href="/professional" class="root-nav-btn">Professional</a>
   </nav>
 
   <div class="root-wrap">
@@ -124,25 +124,19 @@
   </dialog>
 
   <script>
-    const GALLERY_URL = '/artData.xml';
+    const GALLERY_URL = '/artData.json';
 
     async function loadGallery() {
       try {
         const res = await fetch(GALLERY_URL);
-        const xml = await res.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(xml, 'text/xml');
-        const posts = [...doc.querySelectorAll('artPost')];
+        const data = await res.json();
+        const posts = data.artData || [];
 
-        const filtered = posts.filter(p => {
-          const type = p.querySelector('metadata > type')?.textContent?.trim();
-          return type === 'personal';
-        });
+        const filtered = posts.filter(p => p.type === 'personal');
 
         const dims = { 'false': [], 'true': [] };
         for (const post of filtered) {
-          const is3D = post.querySelector('metadata > is3D')?.textContent?.trim() === 'true';
-          dims[String(is3D)].push(parsePost(post));
+          dims[String(post.is3D)].push(post);
         }
 
         renderGrid('grid2d', dims['false']);
@@ -150,19 +144,6 @@
       } catch (e) {
         console.error('Failed to load gallery:', e);
       }
-    }
-
-    function parsePost(post) {
-      const g = m => post.querySelector(`metadata > ${m}`)?.textContent?.trim() || '';
-      return {
-        type: g('type'),
-        is3D: g('is3D') === 'true',
-        title: g('title'),
-        description: g('description'),
-        sourceLink: g('sourceLink'),
-        images: [...post.querySelectorAll('carousel > image')].map(img => img.getAttribute('url')).filter(Boolean),
-        embed: post.querySelector('carousel > embed')?.textContent?.trim() || '',
-      };
     }
 
     function renderGrid(id, items) {

@@ -6,70 +6,46 @@
 const UPLOADPASS = "secrets.UPLOADPASS";
 const ACCTOKEN   = "secrets.ACCTOKEN";
 const REPO       = "Spewku/Spewku.github.io";
-const XML_PATH   = "artData.xml";
+const DATA_PATH  = "artData.json";
 
 /* ── helpers ── */
-function escapeXml(str) {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+
+function buildJson(data) {
+  const entry = {
+    type: data.isPersonal ? "personal" : "professional",
+    is3D: data.is3D === "true",
+    title: data.title,
+    description: data.description,
+    sourceLink: data.sourceLink,
+    images: data.carouselImages.filter(url => url.trim().length > 0).map(url => url.trim()),
+  };
+
+  if (data.includeEmbed && data.embedCode.trim()) {
+    entry.embed = data.embedCode;
+  }
+
+  return entry;
 }
 
-function buildXml(data) {
-  const indent = (lvl) => "  ".repeat(lvl);
-
-  const images = data.carouselImages
-    .filter((url) => url.trim().length > 0)
-    .map((url) => `${indent(2)}<image url="${escapeXml(url.trim())}" />`)
-    .join("\n");
-
-  const embedPart =
-    data.includeEmbed && data.embedCode.trim()
-      ? `\n${indent(2)}<embed><![CDATA[\n${data.embedCode}\n${indent(2)}]]></embed>`
-      : "";
-
-  return [
-    "  <artPost>",
-    `${indent(1)}<metadata>`,
-    `${indent(2)}<type>${data.isPersonal ? "personal" : "professional"}</type>`,
-    `${indent(2)}<is3D>${data.is3D}</is3D>`,
-    `${indent(2)}<title>${escapeXml(data.title)}</title>`,
-    `${indent(2)}<description>${escapeXml(data.description)}</description>`,
-    `${indent(2)}<sourceLink>${escapeXml(data.sourceLink)}</sourceLink>`,
-    `${indent(1)}</metadata>`,
-    `${indent(1)}<carousel>`,
-    images || `${indent(2)}<!-- no images specified -->`,
-    embedPart,
-    `${indent(1)}</carousel>`,
-    "  </artPost>",
-  ].join("\n");
-}
-
-async function fetchCurrentXml(token) {
-  const url = `https://api.github.com/repos/${REPO}/contents/${XML_PATH}`;
+async function fetchCurrentData(token) {
+  const url = `https://api.github.com/repos/${REPO}/contents/${DATA_PATH}`;
   const res = await fetch(url, {
     headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
   });
-  if (!res.ok) throw new Error(`Failed to fetch current XML (${res.status})`);
+  if (!res.ok) throw new Error(`Failed to fetch current data (${res.status})`);
   return res.json();
 }
 
-async function commitToGithub(token, newEntryXml) {
-  const { content: currentBase64, sha } = await fetchCurrentXml(token);
+async function commitToGithub(token, newEntry) {
+  const { content: currentBase64, sha } = await fetchCurrentData(token);
 
   const decoded = atob(currentBase64);
+  const current = JSON.parse(decoded);
 
-  let updated;
-  if (decoded.includes("<artData>")) {
-    const insertBefore = "</artData>";
-    updated = decoded.replace(insertBefore, `${newEntryXml}\n${insertBefore}`);
-  } else {
-    updated = `<?xml version="1.0" encoding="UTF-8"?>\n<artData>\n${newEntryXml}\n</artData>\n`;
-  }
+  if (!current.artData) current.artData = [];
+  current.artData.push(newEntry);
 
+  const updated = JSON.stringify(current, null, 2);
   const newBase64 = btoa(unescape(encodeURIComponent(updated)));
 
   const body = {
@@ -78,7 +54,7 @@ async function commitToGithub(token, newEntryXml) {
     sha,
   };
 
-  const url = `https://api.github.com/repos/${REPO}/contents/${XML_PATH}`;
+  const url = `https://api.github.com/repos/${REPO}/contents/${DATA_PATH}`;
   const res = await fetch(url, {
     method: "PUT",
     headers: {
@@ -157,7 +133,7 @@ function initForm() {
   includeEmbedCheckbox.addEventListener("change", updateEmbedVisibility);
   updateEmbedVisibility();
 
-  let lastXml = "";
+  let lastJson = "";
 
   generateBtn.addEventListener("click", () => {
     const data = {
@@ -171,23 +147,24 @@ function initForm() {
       embedCode: document.getElementById("embedCode").value,
     };
 
-    const xml = buildXml(data);
-    lastXml = xml;
-    output.textContent = xml;
+    const entry = buildJson(data);
+    const json = JSON.stringify(entry, null, 2);
+    lastJson = json;
+    output.textContent = json;
     downloadBtn.disabled = false;
     commitBtn.disabled = !ACCTOKEN;
     statusMsg.textContent = "";
   });
 
   downloadBtn.addEventListener("click", () => {
-    if (!lastXml) return;
+    if (!lastJson) return;
     const title = document.getElementById("title").value;
-    const blob = new Blob([lastXml], { type: "application/xml" });
+    const blob = new Blob([lastJson], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const safeTitle = title.trim().replace(/[^\w-]+/g, "_") || "art_post";
     a.href = url;
-    a.download = `${safeTitle}.xml`;
+    a.download = `${safeTitle}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -195,7 +172,7 @@ function initForm() {
   });
 
   commitBtn.addEventListener("click", async () => {
-    if (!lastXml) return;
+    if (!lastJson) return;
     if (!ACCTOKEN) {
       statusMsg.textContent = "ACCTOKEN not configured — set it in main.js";
       statusMsg.className = "status-msg error";
@@ -203,11 +180,12 @@ function initForm() {
     }
 
     commitBtn.disabled = true;
-    statusMsg.textContent = "Fetching current XML from GitHub...";
+    statusMsg.textContent = "Fetching current data from GitHub...";
     statusMsg.className = "status-msg";
 
     try {
-      const result = await commitToGithub(ACCTOKEN, lastXml);
+      const entry = JSON.parse(lastJson);
+      const result = await commitToGithub(ACCTOKEN, entry);
       statusMsg.textContent = `Committed! SHA: ${result.content.sha.slice(0, 7)}`;
       statusMsg.className = "status-msg success";
     } catch (e) {
