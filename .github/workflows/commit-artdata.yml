@@ -1,0 +1,34 @@
+name: Commit artData from Manage
+
+on:
+  workflow_dispatch:
+    inputs:
+      data:
+        description: "Full artData.json content"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write artData.json
+        env:
+          DATA: ${{ github.event.inputs.data }}
+        run: echo "$DATA" > artData.json
+
+      - name: Commit and push
+        run: |
+          git config user.name "spewku-bot"
+          git config user.email "spewku-bot@users.noreply.github.com"
+          git add artData.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update artData.json from manage page"
+            git push
+          fi
