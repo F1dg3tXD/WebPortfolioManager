@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>spewku.com — profesional</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+  <meta content="Spewku | Professional" property="og:title" />
+  <meta content="Spewku's professional work." property="og:description" />
+  <meta content="https://spewku.com/profesional" property="og:url" />
+  <meta content="https://spewku.com/personal/pfp.png" property="og:image" />
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="2048">
+  <meta property="og:image:height" content="2048">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image:src" content="https://spewku.com/img/icon.png">
+  <meta content="#0990f7" data-react-helmet="true" name="theme-color" />
+</head>
+<body>
+  <div class="pageloader" id="pageloader"><div class="pageloader-spinner"></div></div>
+
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+
+  <header class="pfp-bar">
+    <a href="/" class="pfp-link">
+      <img src="/personal/pfp.png" alt="SPEWKU" class="pfp-thumb" />
+      <span class="pfp-name">SPEWKU</span>
+    </a>
+    <span class="pfp-label">profesional</span>
+  </header>
+
+  <main class="gallery" id="gallery">
+    <section class="column">
+      <h2 class="column-heading">Professional Work</h2>
+      <div class="grid" id="gridPro"></div>
+    </section>
+  </main>
+
+  <dialog class="detail" id="detail">
+    <div class="detail-scroll">
+      <button class="detail-close" id="detailClose" aria-label="Close">&times;</button>
+      <img class="detail-hero" id="detailHero" alt="" />
+      <h2 class="detail-title" id="detailTitle"></h2>
+      <p class="detail-desc" id="detailDesc"></p>
+      <div class="detail-carousel" id="detailCarousel"></div>
+      <a class="detail-source" id="detailSource" target="_blank" rel="noopener">View source</a>
+      <div class="detail-embed" id="detailEmbed"></div>
+    </div>
+  </dialog>
+
+  <script>
+    const GALLERY_URL = '/artData.json';
+
+    async function loadGallery() {
+      try {
+        const res = await fetch(GALLERY_URL);
+        const data = await res.json();
+        const posts = data.artData || [];
+
+        const filtered = posts.filter(p => p.type === 'professional');
+
+        renderGrid('gridPro', filtered);
+      } catch (e) {
+        console.error('Failed to load gallery:', e);
+      }
+    }
+
+    function renderGrid(id, items) {
+      const grid = document.getElementById(id);
+      grid.innerHTML = items.map(item => {
+        const thumb = item.images[0] || '';
+        const encoded = encodeURIComponent(JSON.stringify(item));
+        return `<div class="card" data-post='${encoded}'>
+          <div class="card-thumb" style="background-image:url('${thumb}')"></div>
+          <span class="card-title">${item.title}</span>
+        </div>`;
+      }).join('');
+
+      grid.querySelectorAll('.card').forEach(el => {
+        el.addEventListener('click', () => openDetail(el.dataset.post));
+      });
+    }
+
+    function openDetail(encoded) {
+      if (!encoded) return;
+      const item = JSON.parse(decodeURIComponent(encoded));
+      const dialog = document.getElementById('detail');
+
+      document.getElementById('detailHero').src = item.images[0] || '';
+      document.getElementById('detailHero').alt = item.title;
+      document.getElementById('detailTitle').textContent = item.title;
+      document.getElementById('detailDesc').textContent = item.description;
+
+      const carousel = document.getElementById('detailCarousel');
+      carousel.innerHTML = item.images.map(src =>
+        `<img src="${src}" alt="" class="detail-carousel-img" />`
+      ).join('');
+
+      const source = document.getElementById('detailSource');
+      if (item.sourceLink) {
+        source.href = item.sourceLink;
+        source.style.display = 'inline-block';
+      } else {
+        source.style.display = 'none';
+      }
+
+      const embedDiv = document.getElementById('detailEmbed');
+      if (item.embed) {
+        embedDiv.innerHTML = item.embed;
+        embedDiv.style.display = 'block';
+      } else {
+        embedDiv.style.display = 'none';
+      }
+
+      dialog.showModal();
+      document.body.style.overflow = 'hidden';
+    }
+
+    document.getElementById('detailClose').addEventListener('click', () => {
+      document.getElementById('detail').close();
+      document.body.style.overflow = '';
+    });
+
+    document.getElementById('detail').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        document.getElementById('detail').close();
+        document.body.style.overflow = '';
+      }
+    });
+
+    loadGallery();
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const el = document.getElementById('pageloader');
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 400);
+    });
+  </script>
+</body>
+</html>

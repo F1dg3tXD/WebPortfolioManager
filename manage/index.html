@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Manage Art</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="pageloader" id="pageloader"><div class="pageloader-spinner"></div></div>
+
+  <div class="gate" id="gate">
+    <div class="gate-card">
+      <h1 class="gate-title">Manage Access</h1>
+      <p class="gate-sub">Enter the password to continue</p>
+      <input id="gatePass" type="password" class="gate-input" placeholder="Password" autofocus />
+      <button id="gateBtn" class="gate-btn">Unlock</button>
+      <p id="gateError" class="gate-error"></p>
+    </div>
+  </div>
+
+  <div class="app" id="app" style="display:none">
+    <div class="topbar">
+      <h1 class="topbar-title">Manage Art</h1>
+      <div class="topbar-right">
+        <span id="statusMsg" class="status-msg"></span>
+        <button id="addBtn" class="add-btn" title="Add new artwork">+</button>
+        <button id="saveBtn" class="commit-btn" disabled>Save Changes</button>
+      </div>
+    </div>
+
+    <div class="columns" id="columns">
+      <div class="column" data-category="personal-2d">
+        <div class="column-header">Personal <span class="dim-label">2D</span> <span class="column-count" id="count-personal-2d">0</span></div>
+        <div class="column-body" id="col-personal-2d"></div>
+      </div>
+      <div class="column" data-category="personal-3d">
+        <div class="column-header">Personal <span class="dim-label">3D</span> <span class="column-count" id="count-personal-3d">0</span></div>
+        <div class="column-body" id="col-personal-3d"></div>
+      </div>
+      <div class="column" data-category="professional-2d">
+        <div class="column-header">Professional <span class="dim-label">2D</span> <span class="column-count" id="count-professional-2d">0</span></div>
+        <div class="column-body" id="col-professional-2d"></div>
+      </div>
+      <div class="column" data-category="professional-3d">
+        <div class="column-header">Professional <span class="dim-label">3D</span> <span class="column-count" id="count-professional-3d">0</span></div>
+        <div class="column-body" id="col-professional-3d"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay" style="display:none">
+    <div class="overlay-bg" id="overlayBg"></div>
+    <div class="edit-panel">
+      <h2 class="edit-panel-title" id="editPanelTitle">Edit Details</h2>
+      <form id="editForm" class="edit-form">
+        <section class="row">
+          <label class="field-label">Section</label>
+          <div class="toggle-group" role="radiogroup">
+            <button type="button" class="toggle active" data-value="personal">Personal</button>
+            <button type="button" class="toggle" data-value="professional">Professional</button>
+          </div>
+        </section>
+
+        <section class="row">
+          <label class="field-label">Dimension</label>
+          <div class="toggle-group" role="radiogroup">
+            <button type="button" class="toggle active" data-value="false">2D</button>
+            <button type="button" class="toggle" data-value="true">3D</button>
+          </div>
+        </section>
+
+        <hr class="divider" />
+
+        <label class="field-label">Title</label>
+        <input id="editTitle" type="text" class="text-input" maxlength="120" />
+
+        <label class="field-label">Description</label>
+        <textarea id="editDescription" class="text-input textarea" rows="3"></textarea>
+
+        <label class="field-label">Source Link</label>
+        <input id="editSourceLink" type="url" class="text-input" />
+
+        <label class="field-label">Image URLs <span class="field-note">one per line</span></label>
+        <textarea id="editImages" class="text-input textarea" rows="4"></textarea>
+
+        <div class="row inline">
+          <label class="field-label">Include embed</label>
+          <label class="switch">
+            <input type="checkbox" id="editIncludeEmbed" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div id="editEmbedRow">
+          <label class="field-label">Embed code</label>
+          <textarea id="editEmbedCode" class="text-input textarea" rows="3"></textarea>
+        </div>
+      </form>
+      <div class="edit-actions">
+        <button id="editCloseBtn" class="secondary-btn">Cancel</button>
+        <button id="editSaveBtn" class="primary-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      const el = document.getElementById('pageloader');
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 400);
+    });
+  </script>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
