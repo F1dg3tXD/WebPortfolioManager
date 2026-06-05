@@ -25,8 +25,8 @@ jobs:
 
       - name: Inject secrets into upload page
         run: |
-          sed -i "s/secrets\.UPLOADPASS/${{ secrets.UPLOADPASS }}/g" upload/main.js
-          sed -i "s/secrets\.ACCTOKEN/${{ secrets.ACCTOKEN }}/g" upload/main.js
+          sed -i "s/secrets\.UPLOADPASS/${{ secrets.UPLOADPASS }}/g" manage/main.js
+          sed -i "s/secrets\.ACCTOKEN/${{ secrets.ACCTOKEN }}/g" manage/main.js
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
