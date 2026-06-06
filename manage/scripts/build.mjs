@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { existsSync, copyFileSync, rmSync, mkdirSync } from "fs";
+import { existsSync, copyFileSync, cpSync, rmSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -42,10 +42,9 @@ mkdirSync(DIST, { recursive: true });
 run(`npx esbuild server.js --bundle --platform=node --format=cjs --outfile=${join(DIST, "bundle.cjs")}`);
 
 // 2. Copy public/ folder to dist/
+const publicSrc = join(ROOT, "public");
 const publicDest = join(DIST, "public");
-if (!existsSync(publicDest)) {
-  execSync(`cp -r "${join(ROOT, "public")}" "${publicDest}"`, { stdio: "inherit" });
-}
+cpSync(publicSrc, publicDest, { recursive: true });
 
 // 3. Create SEA config
 const seaConfig = {
