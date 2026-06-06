@@ -1,0 +1,55 @@
+name: Build WebPortfolioManager
+
+on:
+  workflow_dispatch:
+  push:
+  schedule:
+    - cron: "0 0 * * *" # Daily update/build
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: windows
+          - os: ubuntu-latest
+            artifact_name: linux
+          - os: macos-latest
+            artifact_name: macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Clone WebPortfolioManager
+        run: |
+          git clone https://github.com/F1dg3tXD/WebPortfolioManager.git
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: WebPortfolioManager/manage/package-lock.json
+
+      - name: Install dependencies
+        working-directory: WebPortfolioManager/manage
+        run: npm install
+
+      - name: Build application
+        working-directory: WebPortfolioManager/manage
+        run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebPortfolioManager-${{ matrix.artifact_name }}
+          path: |
+            WebPortfolioManager/manage/dist/**
+            WebPortfolioManager/manage/build/**
+            WebPortfolioManager/manage/out/**
+          if-no-files-found: warn
