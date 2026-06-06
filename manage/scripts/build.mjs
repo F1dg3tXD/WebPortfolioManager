@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { existsSync, copyFileSync, cpSync, rmSync, mkdirSync } from "fs";
+import { existsSync, copyFileSync, cpSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -39,7 +39,7 @@ console.log(`Building for ${TARGET}`);
 mkdirSync(DIST, { recursive: true });
 
 // 1. Bundle server.js + deps into a single CJS file
-run(`npx esbuild server.js --bundle --platform=node --format=cjs --outfile=${join(DIST, "bundle.cjs")}`);
+run(`npx esbuild server.js --bundle --platform=node --format=cjs --outfile="${join(DIST, "bundle.cjs")}"`);
 
 // 2. Copy public/ folder to dist/
 const publicSrc = join(ROOT, "public");
@@ -53,7 +53,7 @@ const seaConfig = {
   disableExperimentalSEAWarning: true,
 };
 const configPath = join(DIST, "sea-config.json");
-execSync(`echo '${JSON.stringify(seaConfig)}' > "${configPath}"`, { stdio: "inherit" });
+writeFileSync(configPath, JSON.stringify(seaConfig, null, 2));
 
 // 4. Generate the SEA blob
 run(`node --experimental-sea-config "${configPath}"`);
