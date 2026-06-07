@@ -1,6 +1,8 @@
 let artData = [];
 let currentEditIdx = -1;
 let dirty = false;
+let clipboard = null;
+let contextMenuTargetIdx = -1;
 
 const CATEGORY_MAP = {
   "personal-2d": { type: "personal", is3D: false },
@@ -107,6 +109,28 @@ function createCard(entry, idx) {
   card.appendChild(thumb);
   card.appendChild(info);
 
+  card.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu(e.clientX, e.clientY, idx);
+  });
+
+  card.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    const rect = card.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    card.classList.toggle("dnd-before", before);
+    card.classList.toggle("dnd-after", !before);
+    card.closest(".column-body")?.classList.remove("drag-over");
+  });
+
+  card.addEventListener("dragleave", (e) => {
+    if (card.contains(e.relatedTarget)) return;
+    card.classList.remove("dnd-before", "dnd-after");
+  });
+
   card.addEventListener("dragstart", (e) => {
     e.dataTransfer.setData("text/plain", String(idx));
     e.dataTransfer.effectAllowed = "move";
@@ -116,6 +140,7 @@ function createCard(entry, idx) {
   card.addEventListener("dragend", () => {
     card.classList.remove("dragging");
     document.querySelectorAll(".column-body.drag-over").forEach((el) => el.classList.remove("drag-over"));
+    document.querySelectorAll(".card.dnd-before, .card.dnd-after").forEach((el) => el.classList.remove("dnd-before", "dnd-after"));
   });
 
   return card;
@@ -167,16 +192,18 @@ function setupColumns() {
       body.classList.add("drag-over");
     });
 
-    body.addEventListener("dragleave", () => {
+    body.addEventListener("dragleave", (e) => {
+      if (body.contains(e.relatedTarget)) return;
       body.classList.remove("drag-over");
     });
 
     body.addEventListener("drop", (e) => {
       e.preventDefault();
       body.classList.remove("drag-over");
+      document.querySelectorAll(".card.dnd-before, .card.dnd-after").forEach((el) => el.classList.remove("dnd-before", "dnd-after"));
 
-      const idx = parseInt(e.dataTransfer.getData("text/plain"), 10);
-      if (isNaN(idx) || idx < 0 || idx >= artData.length) return;
+      const srcIdx = parseInt(e.dataTransfer.getData("text/plain"), 10);
+      if (isNaN(srcIdx) || srcIdx < 0 || srcIdx >= artData.length) return;
 
       const column = body.closest(".column");
       if (!column) return;
@@ -185,8 +212,44 @@ function setupColumns() {
       const target = CATEGORY_MAP[category];
       if (!target) return;
 
-      const entry = artData[idx];
-      if (entry.type === target.type && entry.is3D === target.is3D) return;
+      const entry = artData[srcIdx];
+      const sameCategory = entry.type === target.type && entry.is3D === target.is3D;
+
+      if (sameCategory) {
+        const cardEl = e.target.closest(".card");
+        let tgtIdx = -1;
+        let before = true;
+        if (cardEl) {
+          tgtIdx = parseInt(cardEl.dataset.idx, 10);
+          const rect = cardEl.getBoundingClientRect();
+          before = e.clientY < rect.top + rect.height / 2;
+        }
+
+        if (tgtIdx === -1) {
+          let lastIdx = -1;
+          for (let i = 0; i < artData.length; i++) {
+            if (artData[i].type === entry.type && artData[i].is3D === entry.is3D) {
+              lastIdx = i;
+            }
+          }
+          if (lastIdx === srcIdx) { renderAll(); return; }
+          const [moved] = artData.splice(srcIdx, 1);
+          const insertAt = lastIdx > srcIdx ? lastIdx - 1 : lastIdx;
+          artData.splice(insertAt + 1, 0, moved);
+        } else {
+          if (srcIdx === tgtIdx) { renderAll(); return; }
+          const [moved] = artData.splice(srcIdx, 1);
+          let insertAt = tgtIdx;
+          if (tgtIdx > srcIdx) insertAt = tgtIdx - 1;
+          if (!before) insertAt = insertAt + 1;
+          artData.splice(insertAt, 0, moved);
+        }
+
+        dirty = true;
+        document.getElementById("saveBtn").disabled = false;
+        renderAll();
+        return;
+      }
 
       entry.type = target.type;
       entry.is3D = target.is3D;
@@ -195,6 +258,96 @@ function setupColumns() {
       renderAll();
     });
   });
+}
+
+function createContextMenu() {
+  const menu = document.createElement("div");
+  menu.className = "context-menu";
+  menu.id = "contextMenu";
+
+  const actions = [
+    { label: "Duplicate", action: "duplicate" },
+    { label: "Delete", action: "delete" },
+    { label: "Copy", action: "copy" },
+    { label: "Paste", action: "paste" },
+  ];
+
+  actions.forEach(({ label, action }) => {
+    const btn = document.createElement("button");
+    btn.className = "context-menu-item";
+    btn.dataset.action = action;
+    btn.textContent = label;
+    if (action === "paste") btn.classList.add("disabled");
+    btn.addEventListener("click", () => handleContextAction(action));
+    menu.appendChild(btn);
+  });
+
+  document.body.appendChild(menu);
+
+  document.addEventListener("click", (e) => {
+    if (!menu.contains(e.target)) menu.style.display = "none";
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") menu.style.display = "none";
+  });
+}
+
+function showContextMenu(x, y, idx) {
+  contextMenuTargetIdx = idx;
+  const menu = document.getElementById("contextMenu");
+  const pasteItem = menu.querySelector('[data-action="paste"]');
+  pasteItem.classList.toggle("disabled", !clipboard);
+
+  menu.style.left = x + "px";
+  menu.style.top = y + "px";
+  menu.style.display = "block";
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) {
+    menu.style.left = (window.innerWidth - rect.width - 8) + "px";
+  }
+  if (rect.bottom > window.innerHeight) {
+    menu.style.top = (window.innerHeight - rect.height - 8) + "px";
+  }
+}
+
+function handleContextAction(action) {
+  const menu = document.getElementById("contextMenu");
+  menu.style.display = "none";
+
+  const idx = contextMenuTargetIdx;
+  if (idx < 0 || idx >= artData.length) return;
+
+  switch (action) {
+    case "duplicate": {
+      const entry = artData[idx];
+      artData.splice(idx + 1, 0, { ...entry });
+      dirty = true;
+      document.getElementById("saveBtn").disabled = false;
+      renderAll();
+      break;
+    }
+    case "delete": {
+      artData.splice(idx, 1);
+      dirty = true;
+      document.getElementById("saveBtn").disabled = false;
+      renderAll();
+      break;
+    }
+    case "copy": {
+      clipboard = { ...artData[idx] };
+      break;
+    }
+    case "paste": {
+      if (!clipboard) return;
+      artData.splice(idx + 1, 0, { ...clipboard });
+      dirty = true;
+      document.getElementById("saveBtn").disabled = false;
+      renderAll();
+      break;
+    }
+  }
 }
 
 function openEdit(idx) {
@@ -311,6 +464,7 @@ async function init() {
   }
 
   setupColumns();
+  createContextMenu();
 
   document.querySelectorAll("#editForm .toggle-group").forEach((group) => {
     const buttons = group.querySelectorAll(".toggle");

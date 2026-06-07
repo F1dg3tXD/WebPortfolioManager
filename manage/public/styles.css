@@ -580,6 +580,56 @@ body {
   background: #555;
 }
 
+.context-menu {
+  position: fixed;
+  z-index: 10000;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  padding: 4px;
+  min-width: 150px;
+  display: none;
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.1s;
+}
+
+.context-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.context-menu-item.disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.context-menu-item.disabled:hover {
+  background: transparent;
+  color: var(--text);
+}
+
+.card.dnd-before {
+  border-top: 2px solid var(--accent);
+}
+
+.card.dnd-after {
+  border-bottom: 2px solid var(--accent);
+}
+
 @media (max-width: 768px) {
   .columns {
     flex-wrap: wrap;

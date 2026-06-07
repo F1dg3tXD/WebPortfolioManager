@@ -707,3 +707,5 @@ manage/node_modules/wsl-utils/index.js
 manage/node_modules/wsl-utils/license
 manage/node_modules/wsl-utils/package.json
 manage/node_modules/wsl-utils/readme.md
+
+*.zip
