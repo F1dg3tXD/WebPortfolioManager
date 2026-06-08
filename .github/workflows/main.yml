@@ -16,8 +16,6 @@ jobs:
             artifact_name: windows
           - os: ubuntu-latest
             artifact_name: linux
-          - os: macos-latest
-            artifact_name: macos
 
     runs-on: ${{ matrix.os }}
 
@@ -49,7 +47,6 @@ jobs:
         with:
           name: WebPortfolioManager-${{ matrix.artifact_name }}
           path: |
-            WebPortfolioManager/manage/dist/**
             WebPortfolioManager/manage/build/**
             WebPortfolioManager/manage/out/**
           if-no-files-found: warn
