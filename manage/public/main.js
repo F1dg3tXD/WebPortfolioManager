@@ -76,9 +76,10 @@ function createCard(entry, idx) {
 
   const thumb = document.createElement("div");
   thumb.className = "card-thumb";
-  if (entry.images && entry.images.length > 0) {
+  const thumbSrc = entry.thumbnail || (entry.images && entry.images[0]);
+  if (thumbSrc) {
     const img = document.createElement("img");
-    img.src = entry.images[0];
+    img.src = thumbSrc;
     img.alt = entry.title || "";
     img.loading = "lazy";
     thumb.appendChild(img);
@@ -365,6 +366,11 @@ function openEdit(idx) {
     document.getElementById("editDescription").value = "";
     document.getElementById("editSourceLink").value = "";
     document.getElementById("editImages").value = "";
+    document.getElementById("editThumbnail").value = "";
+    document.getElementById("editCropX").value = "0";
+    document.getElementById("editCropY").value = "0";
+    document.getElementById("editCropW").value = "0";
+    document.getElementById("editCropH").value = "0";
     document.getElementById("editIncludeEmbed").checked = false;
     document.getElementById("editEmbedCode").value = "";
     document.getElementById("editEmbedRow").style.display = "none";
@@ -378,6 +384,13 @@ function openEdit(idx) {
     document.getElementById("editDescription").value = entry.description || "";
     document.getElementById("editSourceLink").value = entry.sourceLink || "";
     document.getElementById("editImages").value = (entry.images || []).join("\n");
+    document.getElementById("editThumbnail").value = entry.thumbnail || "";
+
+    const crop = entry.thumbnailCrop || {};
+    document.getElementById("editCropX").value = crop.x ?? 0;
+    document.getElementById("editCropY").value = crop.y ?? 0;
+    document.getElementById("editCropW").value = crop.width ?? 0;
+    document.getElementById("editCropH").value = crop.height ?? 0;
 
     const hasEmbed = !!(entry.embed && entry.embed.trim());
     document.getElementById("editIncludeEmbed").checked = hasEmbed;
@@ -393,11 +406,13 @@ function openEdit(idx) {
   }
 
   document.getElementById("overlay").style.display = "flex";
+  loadCropPreview();
 }
 
 function closeEdit() {
   document.getElementById("overlay").style.display = "none";
   currentEditIdx = -1;
+  cropDrag = null;
 }
 
 function saveEdit() {
@@ -421,8 +436,16 @@ function saveEdit() {
   const embedCode = document.getElementById("editEmbedCode").value;
   const embed = includeEmbed && embedCode.trim() ? embedCode : "";
 
+  const thumbnail = document.getElementById("editThumbnail").value.trim();
+  const cx = parseInt(document.getElementById("editCropX").value, 10);
+  const cy = parseInt(document.getElementById("editCropY").value, 10);
+  const cw = parseInt(document.getElementById("editCropW").value, 10);
+  const ch = parseInt(document.getElementById("editCropH").value, 10);
+  const hasCrop = !!(cx || cy || cw || ch);
+  const thumbnailCrop = hasCrop ? { x: cx, y: cy, width: cw, height: ch } : null;
+
   if (isNew) {
-    artData.push({ type, is3D, title, description, sourceLink, images, embed });
+    artData.push({ type, is3D, title, description, sourceLink, images, embed, thumbnail, thumbnailCrop });
   } else {
     const entry = artData[currentEditIdx];
     entry.type = type;
@@ -432,12 +455,180 @@ function saveEdit() {
     entry.sourceLink = sourceLink;
     entry.images = images;
     entry.embed = embed;
+    entry.thumbnail = thumbnail || "";
+    entry.thumbnailCrop = thumbnailCrop;
   }
 
   dirty = true;
   document.getElementById("saveBtn").disabled = false;
   closeEdit();
   renderAll();
+}
+
+let cropDrag = null;
+
+function initCropInteraction() {
+  const preview = document.getElementById("cropPreview");
+  const box = document.getElementById("cropBox");
+
+  preview.addEventListener("dragstart", (e) => e.preventDefault());
+
+  box.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    const handle = e.target.closest(".crop-handle");
+    if (handle) {
+      const cls = Array.from(handle.classList).find((c) => c.startsWith("crop-handle-"));
+      startCropDrag(e, cls.replace("crop-handle-", ""));
+    } else {
+      startCropDrag(e, "move");
+    }
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", doCropDrag);
+  document.addEventListener("mouseup", endCropDrag);
+
+  ["editCropX", "editCropY", "editCropW", "editCropH"].forEach((id) => {
+    document.getElementById(id).addEventListener("input", () => {
+      if (!cropDrag) syncBoxToInputs();
+    });
+  });
+
+  document.getElementById("editThumbnail").addEventListener("input", loadCropPreview);
+}
+
+function loadCropPreview() {
+  const url = document.getElementById("editThumbnail").value.trim();
+  const preview = document.getElementById("cropPreview");
+  const img = document.getElementById("cropPreviewImg");
+
+  if (!url) {
+    preview.style.display = "none";
+    return;
+  }
+
+  img.src = url;
+  img.onload = () => {
+    preview.style.display = "block";
+    const hasCrop =
+      parseInt(document.getElementById("editCropX").value) ||
+      parseInt(document.getElementById("editCropY").value) ||
+      parseInt(document.getElementById("editCropW").value) ||
+      parseInt(document.getElementById("editCropH").value);
+    if (!hasCrop) {
+      const dw = img.offsetWidth;
+      const dh = img.offsetHeight;
+      const cw = Math.round(dw * 0.5);
+      const ch = Math.round(dh * 0.5);
+      const cx = Math.round((dw - cw) / 2);
+      const cy = Math.round((dh - ch) / 2);
+      const scale = img.naturalWidth / dw;
+      document.getElementById("editCropX").value = Math.round(cx * scale);
+      document.getElementById("editCropY").value = Math.round(cy * scale);
+      document.getElementById("editCropW").value = Math.round(cw * scale);
+      document.getElementById("editCropH").value = Math.round(ch * scale);
+    }
+    syncBoxToInputs();
+  };
+  img.onerror = () => {
+    preview.style.display = "none";
+  };
+}
+
+function getDisplayScale() {
+  const img = document.getElementById("cropPreviewImg");
+  if (!img.complete || !img.naturalWidth) return 1;
+  return img.naturalWidth / (img.offsetWidth || 1);
+}
+
+function syncBoxToInputs() {
+  const box = document.getElementById("cropBox");
+  const scale = getDisplayScale();
+  const ox = parseInt(document.getElementById("editCropX").value) || 0;
+  const oy = parseInt(document.getElementById("editCropY").value) || 0;
+  const ow = parseInt(document.getElementById("editCropW").value) || 0;
+  const oh = parseInt(document.getElementById("editCropH").value) || 0;
+
+  box.style.left = ox / scale + "px";
+  box.style.top = oy / scale + "px";
+  box.style.width = ow / scale + "px";
+  box.style.height = oh / scale + "px";
+}
+
+function syncInputsToBox() {
+  const box = document.getElementById("cropBox");
+  const scale = getDisplayScale();
+  const left = parseFloat(box.style.left) || 0;
+  const top = parseFloat(box.style.top) || 0;
+  const w = parseFloat(box.style.width) || 0;
+  const h = parseFloat(box.style.height) || 0;
+
+  document.getElementById("editCropX").value = Math.round(left * scale);
+  document.getElementById("editCropY").value = Math.round(top * scale);
+  document.getElementById("editCropW").value = Math.round(w * scale);
+  document.getElementById("editCropH").value = Math.round(h * scale);
+}
+
+function startCropDrag(e, mode) {
+  const box = document.getElementById("cropBox");
+  const img = document.getElementById("cropPreviewImg");
+  cropDrag = {
+    mode,
+    startX: e.clientX,
+    startY: e.clientY,
+    startLeft: parseFloat(box.style.left) || 0,
+    startTop: parseFloat(box.style.top) || 0,
+    startW: parseFloat(box.style.width) || 0,
+    startH: parseFloat(box.style.height) || 0,
+    maxW: img.offsetWidth || 1,
+    maxH: img.offsetHeight || 1,
+  };
+}
+
+function doCropDrag(e) {
+  if (!cropDrag) return;
+  const { mode, startX, startY, startLeft, startTop, startW, startH, maxW, maxH } = cropDrag;
+  const dx = e.clientX - startX;
+  const dy = e.clientY - startY;
+  const box = document.getElementById("cropBox");
+  const MIN = 20;
+
+  let left = startLeft;
+  let top = startTop;
+  let w = startW;
+  let h = startH;
+
+  if (mode === "move") {
+    left = Math.max(0, Math.min(startLeft + dx, maxW - w));
+    top = Math.max(0, Math.min(startTop + dy, maxH - h));
+  } else {
+    if (mode.includes("e")) w = Math.max(MIN, startW + dx);
+    if (mode.includes("w")) {
+      w = Math.max(MIN, startW - dx);
+      left = startLeft + startW - w;
+    }
+    if (mode.includes("s")) h = Math.max(MIN, startH + dy);
+    if (mode.includes("n")) {
+      h = Math.max(MIN, startH - dy);
+      top = startTop + startH - h;
+    }
+    if (left < 0) { w += left; left = 0; }
+    if (top < 0) { h += top; top = 0; }
+    if (left + w > maxW) w = maxW - left;
+    if (top + h > maxH) h = maxH - top;
+    w = Math.max(MIN, w);
+    h = Math.max(MIN, h);
+  }
+
+  box.style.left = left + "px";
+  box.style.top = top + "px";
+  box.style.width = w + "px";
+  box.style.height = h + "px";
+  syncInputsToBox();
+}
+
+function endCropDrag() {
+  cropDrag = null;
 }
 
 function openSettings() {
@@ -465,6 +656,7 @@ async function init() {
 
   setupColumns();
   createContextMenu();
+  initCropInteraction();
 
   document.querySelectorAll("#editForm .toggle-group").forEach((group) => {
     const buttons = group.querySelectorAll(".toggle");

@@ -94,6 +94,41 @@
         <label class="field-label">Image URLs <span class="field-note">one per line</span></label>
         <textarea id="editImages" class="text-input textarea" rows="4"></textarea>
 
+        <hr class="divider" />
+
+        <label class="field-label">Thumbnail URL <span class="field-note">optional, defaults to first image</span></label>
+        <input id="editThumbnail" type="url" class="text-input" />
+
+        <div class="crop-preview" id="cropPreview" style="display:none">
+          <img id="cropPreviewImg" src="" alt="Thumbnail preview" />
+          <div class="crop-box" id="cropBox">
+            <div class="crop-handle crop-handle-nw"></div>
+            <div class="crop-handle crop-handle-ne"></div>
+            <div class="crop-handle crop-handle-sw"></div>
+            <div class="crop-handle crop-handle-se"></div>
+          </div>
+        </div>
+
+        <label class="field-label">Thumbnail Crop <span class="field-note">px on original image — drag box or corners</span></label>
+        <div class="crop-row">
+          <div class="crop-field">
+            <span class="crop-label">X</span>
+            <input id="editCropX" type="number" class="text-input crop-input" value="0" min="0" />
+          </div>
+          <div class="crop-field">
+            <span class="crop-label">Y</span>
+            <input id="editCropY" type="number" class="text-input crop-input" value="0" min="0" />
+          </div>
+          <div class="crop-field">
+            <span class="crop-label">W</span>
+            <input id="editCropW" type="number" class="text-input crop-input" value="0" min="0" />
+          </div>
+          <div class="crop-field">
+            <span class="crop-label">H</span>
+            <input id="editCropH" type="number" class="text-input crop-input" value="0" min="0" />
+          </div>
+        </div>
+
         <div class="row inline">
           <label class="field-label">Include embed</label>
           <label class="switch">

@@ -428,6 +428,71 @@ body {
   gap: 10px;
 }
 
+.crop-preview {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #000;
+  line-height: 0;
+  user-select: none;
+}
+
+.crop-preview img {
+  width: 100%;
+  display: block;
+}
+
+.crop-box {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 50%;
+  border: 2px solid var(--accent);
+  cursor: move;
+  box-sizing: border-box;
+  z-index: 2;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.55);
+}
+
+.crop-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  z-index: 3;
+}
+
+.crop-handle-nw { top: -7px; left: -7px; cursor: nw-resize; }
+.crop-handle-ne { top: -7px; right: -7px; cursor: ne-resize; }
+.crop-handle-sw { bottom: -7px; left: -7px; cursor: sw-resize; }
+.crop-handle-se { bottom: -7px; right: -7px; cursor: se-resize; }
+
+.crop-row {
+  display: flex;
+  gap: 8px;
+}
+
+.crop-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.crop-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.crop-input {
+  text-align: center;
+}
+
 .switch {
   position: relative;
   width: 46px;
