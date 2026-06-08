@@ -58,12 +58,39 @@ writeFileSync(configPath, JSON.stringify(seaConfig, null, 2));
 // 4. Generate the SEA blob
 run(`node --experimental-sea-config "${configPath}"`);
 
-// 5. Prepare node binary (thin universal binary on macOS)
+// 5. Prepare node binary
 const nodeBin = process.execPath;
 const thinnedBin = join(DIST, "node-thinned");
+
 if (TARGET.startsWith("macos")) {
-  const arch = TARGET === "macos-arm64" ? "arm64" : "x86_64";
-  run(`lipo "${nodeBin}" -thin ${arch} -output "${thinnedBin}"`);
+  try {
+    const info = execSync(`lipo -info "${nodeBin}"`, {
+      encoding: "utf8",
+    });
+
+    console.log(info.trim());
+
+    if (info.includes("Non-fat file")) {
+      console.log("Node is already single-architecture, copying...");
+      copyFileSync(nodeBin, thinnedBin);
+    } else {
+      const arch = TARGET === "macos-arm64"
+        ? "arm64"
+        : "x86_64";
+
+      console.log(`Thinning universal binary to ${arch}...`);
+
+      execSync(
+        `lipo "${nodeBin}" -thin ${arch} -output "${thinnedBin}"`,
+        { stdio: "inherit" }
+      );
+    }
+  } catch (err) {
+    console.warn(
+      "Could not determine binary architecture, copying Node executable."
+    );
+    copyFileSync(nodeBin, thinnedBin);
+  }
 } else {
   copyFileSync(nodeBin, thinnedBin);
 }
