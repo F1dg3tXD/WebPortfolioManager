@@ -106,6 +106,16 @@ function createCard(entry, idx) {
   });
 
   info.appendChild(title);
+
+  const tags = entry.tags || [];
+  if (tags.length) {
+    const tagRow = document.createElement("div");
+    tagRow.className = "card-tags";
+    tagRow.textContent = tags.slice(0, 3).join(", ");
+    if (tags.length > 3) tagRow.textContent += "...";
+    info.appendChild(tagRow);
+  }
+
   info.appendChild(editBtn);
   card.appendChild(thumb);
   card.appendChild(info);
@@ -364,6 +374,7 @@ function openEdit(idx) {
   if (isNew) {
     document.getElementById("editTitle").value = "";
     document.getElementById("editDescription").value = "";
+    document.getElementById("editTags").value = "";
     document.getElementById("editSourceLink").value = "";
     document.getElementById("editImages").value = "";
     document.getElementById("editThumbnail").value = "";
@@ -382,6 +393,7 @@ function openEdit(idx) {
   } else {
     document.getElementById("editTitle").value = entry.title || "";
     document.getElementById("editDescription").value = entry.description || "";
+    document.getElementById("editTags").value = (entry.tags || []).join(", ");
     document.getElementById("editSourceLink").value = entry.sourceLink || "";
     document.getElementById("editImages").value = (entry.images || []).join("\n");
     document.getElementById("editThumbnail").value = entry.thumbnail || "";
@@ -444,14 +456,20 @@ function saveEdit() {
   const hasCrop = !!(cx || cy || cw || ch);
   const thumbnailCrop = hasCrop ? { x: cx, y: cy, width: cw, height: ch } : null;
 
+  const tags = document.getElementById("editTags").value
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t);
+
   if (isNew) {
-    artData.push({ type, is3D, title, description, sourceLink, images, embed, thumbnail, thumbnailCrop });
+    artData.push({ type, is3D, title, description, tags, sourceLink, images, embed, thumbnail, thumbnailCrop });
   } else {
     const entry = artData[currentEditIdx];
     entry.type = type;
     entry.is3D = is3D;
     entry.title = title;
     entry.description = description;
+    entry.tags = tags;
     entry.sourceLink = sourceLink;
     entry.images = images;
     entry.embed = embed;
