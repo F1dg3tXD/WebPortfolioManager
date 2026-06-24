@@ -12,6 +12,7 @@
       <h1 class="topbar-title">Manage Art</h1>
       <div class="topbar-right">
         <span id="statusMsg" class="status-msg"></span>
+        <button id="siteConfigBtn" class="secondary-btn" title="Edit site config" style="font-size:11px;padding:5px 10px">Site Config</button>
         <button id="settingsBtn" class="icon-btn" title="Settings">&#9881;</button>
         <button id="addBtn" class="add-btn" title="Add new artwork">+</button>
         <button id="saveBtn" class="commit-btn" disabled>Save Changes</button>
@@ -26,6 +27,10 @@
       <div class="column" data-category="personal-3d">
         <div class="column-header">Personal <span class="dim-label">3D</span> <span class="column-count" id="count-personal-3d">0</span></div>
         <div class="column-body" id="col-personal-3d"></div>
+      </div>
+      <div class="column" data-category="personal-avatar">
+        <div class="column-header">Personal <span class="dim-label">Avatar</span> <span class="column-count" id="count-personal-avatar">0</span></div>
+        <div class="column-body" id="col-personal-avatar"></div>
       </div>
       <div class="column" data-category="professional-2d">
         <div class="column-header">Professional <span class="dim-label">2D</span> <span class="column-count" id="count-professional-2d">0</span></div>
@@ -59,6 +64,33 @@
     </div>
   </div>
 
+  <div class="overlay" id="siteConfigOverlay" style="display:none">
+    <div class="overlay-bg" id="scOverlayBg"></div>
+    <div class="edit-panel">
+      <h2 class="edit-panel-title">Site Config</h2>
+      <form class="edit-form">
+        <label class="field-label">Bio <span class="field-note">plain text</span></label>
+        <textarea id="scBio" class="text-input textarea" rows="4"></textarea>
+
+        <label class="field-label">Commission Link</label>
+        <input id="scCommissionLink" type="url" class="text-input" />
+
+        <label class="field-label">Socials <span class="field-note">one per line: key: url</span></label>
+        <textarea id="scSocials" class="text-input textarea" rows="4"></textarea>
+
+        <label class="field-label">Links <span class="field-note">one per line: label: url</span></label>
+        <textarea id="scLinks" class="text-input textarea" rows="3"></textarea>
+
+        <label class="field-label">Footer Contacts <span class="field-note">one per line: label: url</span></label>
+        <textarea id="scFooter" class="text-input textarea" rows="3"></textarea>
+      </form>
+      <div class="edit-actions">
+        <button id="scCloseBtn" class="secondary-btn">Cancel</button>
+        <button id="scSaveBtn" class="primary-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="overlay" id="overlay" style="display:none">
     <div class="overlay-bg" id="overlayBg"></div>
     <div class="edit-panel">
@@ -78,6 +110,14 @@
             <button type="button" class="toggle active" data-value="false">2D</button>
             <button type="button" class="toggle" data-value="true">3D</button>
           </div>
+        </section>
+
+        <section class="row inline" style="margin-top:8px">
+          <label class="field-label">Avatar entry</label>
+          <label class="switch">
+            <input type="checkbox" id="editIsAvatarCheck" />
+            <span class="slider"></span>
+          </label>
         </section>
 
         <hr class="divider" />

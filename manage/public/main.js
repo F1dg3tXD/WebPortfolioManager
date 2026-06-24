@@ -5,10 +5,11 @@ let clipboard = null;
 let contextMenuTargetIdx = -1;
 
 const CATEGORY_MAP = {
-  "personal-2d": { type: "personal", is3D: false },
-  "personal-3d": { type: "personal", is3D: true },
-  "professional-2d": { type: "professional", is3D: false },
-  "professional-3d": { type: "professional", is3D: true },
+  "personal-2d": { type: "personal", is3D: false, isAvatar: false },
+  "personal-3d": { type: "personal", is3D: true, isAvatar: false },
+  "personal-avatar": { type: "personal", is3D: false, isAvatar: true },
+  "professional-2d": { type: "professional", is3D: false, isAvatar: false },
+  "professional-3d": { type: "professional", is3D: true, isAvatar: false },
 };
 
 const CATEGORY_KEYS = Object.keys(CATEGORY_MAP);
@@ -64,6 +65,7 @@ async function saveSettings() {
 }
 
 function getCategory(entry) {
+  if (entry.isAvatar) return "personal-avatar";
   const dim = entry.is3D ? "3d" : "2d";
   return `${entry.type || "personal"}-${dim}`;
 }
@@ -224,7 +226,7 @@ function setupColumns() {
       if (!target) return;
 
       const entry = artData[srcIdx];
-      const sameCategory = entry.type === target.type && entry.is3D === target.is3D;
+      const sameCategory = (entry.isAvatar === target.isAvatar) && entry.type === target.type && entry.is3D === target.is3D;
 
       if (sameCategory) {
         const cardEl = e.target.closest(".card");
@@ -264,6 +266,7 @@ function setupColumns() {
 
       entry.type = target.type;
       entry.is3D = target.is3D;
+      entry.isAvatar = target.isAvatar || false;
       dirty = true;
       document.getElementById("saveBtn").disabled = false;
       renderAll();
@@ -385,6 +388,7 @@ function openEdit(idx) {
     document.getElementById("editIncludeEmbed").checked = false;
     document.getElementById("editEmbedCode").value = "";
     document.getElementById("editEmbedRow").style.display = "none";
+    document.getElementById("editIsAvatarCheck").checked = false;
 
     workTypeToggles.forEach((b) => b.classList.remove("active"));
     workTypeToggles[0].classList.add("active");
@@ -408,6 +412,7 @@ function openEdit(idx) {
     document.getElementById("editIncludeEmbed").checked = hasEmbed;
     document.getElementById("editEmbedCode").value = entry.embed || "";
     document.getElementById("editEmbedRow").style.display = hasEmbed ? "block" : "none";
+    document.getElementById("editIsAvatarCheck").checked = !!entry.isAvatar;
 
     workTypeToggles.forEach((b) => {
       b.classList.toggle("active", b.dataset.value === entry.type);
@@ -456,17 +461,20 @@ function saveEdit() {
   const hasCrop = !!(cx || cy || cw || ch);
   const thumbnailCrop = hasCrop ? { x: cx, y: cy, width: cw, height: ch } : null;
 
+  const isAvatar = document.getElementById("editIsAvatarCheck").checked;
+
   const tags = document.getElementById("editTags").value
     .split(",")
     .map((t) => t.trim())
     .filter((t) => t);
 
   if (isNew) {
-    artData.push({ type, is3D, title, description, tags, sourceLink, images, embed, thumbnail, thumbnailCrop });
+    artData.push({ type, is3D, isAvatar, title, description, tags, sourceLink, images, embed, thumbnail, thumbnailCrop });
   } else {
     const entry = artData[currentEditIdx];
     entry.type = type;
     entry.is3D = is3D;
+    entry.isAvatar = isAvatar;
     entry.title = title;
     entry.description = description;
     entry.tags = tags;
@@ -657,20 +665,99 @@ function closeSettings() {
   document.getElementById("settingsOverlay").style.display = "none";
 }
 
+let siteConfig = null;
+let siteConfigSha = null;
+
+async function loadSiteConfig() {
+  const res = await fetch("/api/siteconfig");
+  if (!res.ok) return;
+  const result = await res.json();
+  siteConfig = result.data || {};
+  siteConfigSha = result.sha || null;
+}
+
+function openSiteConfig() {
+  const p = (siteConfig && siteConfig.personal) || {};
+  document.getElementById("scBio").value = (p.bio || "").replace(/<br\s*\/?>/gi, "\n");
+  document.getElementById("scCommissionLink").value = p.commissionLink || "";
+  document.getElementById("scSocials").value = Object.entries(p.socials || {})
+    .map(([k, v]) => `${k}: ${v}`).join("\n");
+  document.getElementById("scLinks").value = (p.links || [])
+    .map(l => `${l.label}: ${l.url}`).join("\n");
+  document.getElementById("scFooter").value = (p.footerContacts || [])
+    .map(c => `${c.label}: ${c.url}`).join("\n");
+  document.getElementById("siteConfigOverlay").style.display = "flex";
+}
+
+function closeSiteConfig() {
+  document.getElementById("siteConfigOverlay").style.display = "none";
+}
+
+async function saveSiteConfig() {
+  const rawSocials = document.getElementById("scSocials").value.split("\n").filter(l => l.trim());
+  const socials = {};
+  for (const line of rawSocials) {
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    socials[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  }
+
+  const rawLinks = document.getElementById("scLinks").value.split("\n").filter(l => l.trim());
+  const links = rawLinks.map(line => {
+    const idx = line.indexOf(":");
+    return idx === -1 ? null : { label: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+  }).filter(Boolean);
+
+  const rawFooter = document.getElementById("scFooter").value.split("\n").filter(l => l.trim());
+  const footerContacts = rawFooter.map(line => {
+    const idx = line.indexOf(":");
+    return idx === -1 ? null : { label: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+  }).filter(Boolean);
+
+  const data = {
+    personal: {
+      bio: document.getElementById("scBio").value.trim(),
+      commissionLink: document.getElementById("scCommissionLink").value.trim(),
+      socials,
+      links,
+      footerContacts,
+    },
+    professional: (siteConfig && siteConfig.professional) || { bio: "", contacts: [] },
+  };
+
+  const res = await fetch("/api/siteconfig", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data, sha: siteConfigSha }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  const result = await res.json();
+  siteConfigSha = result.sha;
+  siteConfig = data;
+}
+
 async function init() {
   const status = document.getElementById("statusMsg");
   const saveBtn = document.getElementById("saveBtn");
 
-  status.textContent = "Loading data from GitHub...";
-  status.className = "status-msg";
-  try {
-    await loadData();
-    status.textContent = `${artData.length} entries loaded`;
-    status.className = "status-msg success";
-  } catch (e) {
-    status.textContent = `Error: ${e.message}`;
-    status.className = "status-msg error";
-  }
+    status.textContent = "Loading data from GitHub...";
+    status.className = "status-msg";
+    try {
+      await loadData();
+      status.textContent = `${artData.length} entries loaded`;
+      status.className = "status-msg success";
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.className = "status-msg error";
+    }
+    try {
+      await loadSiteConfig();
+    } catch (e) {
+      console.warn("Could not load site config:", e);
+    }
 
   setupColumns();
   createContextMenu();
@@ -695,6 +782,27 @@ async function init() {
   document.getElementById("editIncludeEmbed").addEventListener("change", () => {
     const row = document.getElementById("editEmbedRow");
     row.style.display = document.getElementById("editIncludeEmbed").checked ? "block" : "none";
+  });
+
+  document.getElementById("siteConfigBtn").addEventListener("click", openSiteConfig);
+  document.getElementById("scOverlayBg").addEventListener("click", closeSiteConfig);
+  document.getElementById("scCloseBtn").addEventListener("click", closeSiteConfig);
+  document.getElementById("scSaveBtn").addEventListener("click", async () => {
+    const btn = document.getElementById("scSaveBtn");
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+    try {
+      await saveSiteConfig();
+      closeSiteConfig();
+      status.textContent = "Site config saved";
+      status.className = "status-msg success";
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.className = "status-msg error";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Save";
+    }
   });
 
   document.getElementById("settingsBtn").addEventListener("click", openSettings);

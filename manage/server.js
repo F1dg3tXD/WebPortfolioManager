@@ -95,6 +95,52 @@ app.get("/api/data", async (req, res) => {
   }
 });
 
+app.get("/api/siteconfig", async (req, res) => {
+  try {
+    const api = `https://api.github.com/repos/${config.repo}/contents/siteConfig.json`;
+    const response = await fetch(api, { headers: getAuthHeaders() });
+    if (!response.ok) {
+      if (response.status === 404) {
+        return res.json({ personal: {}, professional: {} });
+      }
+      const err = await response.json();
+      return res.status(response.status).json({ error: err.message });
+    }
+    const { content, sha: fileSha } = await response.json();
+    const decoded = JSON.parse(Buffer.from(content, "base64").toString("utf-8"));
+    res.json({ data: decoded, sha: fileSha });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/siteconfig", async (req, res) => {
+  try {
+    const { data, sha } = req.body;
+    if (!data) return res.status(400).json({ error: "data is required" });
+    const encoded = Buffer.from(JSON.stringify(data, null, 2)).toString("base64");
+    const api = `https://api.github.com/repos/${config.repo}/contents/siteConfig.json`;
+    const body = {
+      message: "Update siteConfig from manage page",
+      content: encoded,
+      sha: sha || undefined,
+    };
+    const response = await fetch(api, {
+      method: "PUT",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      return res.status(response.status).json({ error: err.message });
+    }
+    const result = await response.json();
+    res.json({ sha: result.content.sha });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/commit", async (req, res) => {
   try {
     if (!currentSha) {
