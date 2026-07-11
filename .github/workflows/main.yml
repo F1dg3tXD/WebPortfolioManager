@@ -18,8 +18,8 @@ jobs:
           - os: ubuntu-latest
             artifact_name: linux
 
-          # - os: macos-latest
-          #   artifact_name: macos
+          - os: macos-latest
+            artifact_name: macos
 
     runs-on: ${{ matrix.os }}
 
@@ -55,28 +55,16 @@ jobs:
           echo "=== OUT ==="
           ls -R out || true
 
-      # Zip macOS .app bundle
-      # - name: Package macOS app
-      #   if: runner.os == 'macOS'
-      #   working-directory: WebPortfolioManager/manage
-      #   run: |
-      #     APP=$(find dist out build -name "*.app" -type d 2>/dev/null | head -n 1)
-
-      #     if [ -z "$APP" ]; then
-      #       echo "No .app bundle found!"
-      #       exit 1
-      #     fi
-
-      #     echo "Found app bundle: $APP"
-
-      #     ditto -c -k --sequesterRsrc --keepParent "$APP" app-macos.zip
-
-      # - name: Upload macOS artifact
-      #   if: runner.os == 'macOS'
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: WebPortfolioManager-macos
-      #     path: WebPortfolioManager/manage/app-macos.zip
+      - name: Upload macOS artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebPortfolioManager-${{ matrix.artifact_name }}
+          path: |
+            WebPortfolioManager/manage/dist/**
+            WebPortfolioManager/manage/build/**
+            WebPortfolioManager/manage/out/**
+          if-no-files-found: warn
 
       - name: Upload Windows/Linux artifacts
         if: runner.os != 'macOS'
