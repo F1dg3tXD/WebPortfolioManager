@@ -686,6 +686,19 @@ function openSiteConfig() {
     .map(l => `${l.label}: ${l.url}`).join("\n");
   document.getElementById("scFooter").value = (p.footerContacts || [])
     .map(c => `${c.label}: ${c.url}`).join("\n");
+
+  document.getElementById("scPfpImage").value = (siteConfig && siteConfig.site && siteConfig.site.pfpImage) || "";
+  document.getElementById("scAboutImage").value = (siteConfig && siteConfig.about && siteConfig.about.image) || "";
+
+  const sp = (siteConfig && siteConfig.socialsPage) || {};
+  document.getElementById("scSocialsIcons").value = (sp.icons || [])
+    .map(c => `${c.name}: ${c.url}`).join("\n");
+  document.getElementById("scSocialsGrid").value = (sp.grid || [])
+    .map(c => `${c.name}: ${c.url}`).join("\n");
+  document.getElementById("scSocialImage").value = sp.socialImage || "";
+  document.getElementById("scSocialsFooter").value = (sp.footerContacts || [])
+    .map(c => `${c.label}: ${c.url}`).join("\n");
+
   document.getElementById("siteConfigOverlay").style.display = "flex";
 }
 
@@ -714,6 +727,24 @@ async function saveSiteConfig() {
     return idx === -1 ? null : { label: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
   }).filter(Boolean);
 
+  const rawSocialsIcons = document.getElementById("scSocialsIcons").value.split("\n").filter(l => l.trim());
+  const socialsIcons = rawSocialsIcons.map(line => {
+    const idx = line.indexOf(":");
+    return idx === -1 ? null : { name: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+  }).filter(Boolean);
+
+  const rawSocialsGrid = document.getElementById("scSocialsGrid").value.split("\n").filter(l => l.trim());
+  const socialsGrid = rawSocialsGrid.map(line => {
+    const idx = line.indexOf(":");
+    return idx === -1 ? null : { name: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+  }).filter(Boolean);
+
+  const rawSocialsFooter = document.getElementById("scSocialsFooter").value.split("\n").filter(l => l.trim());
+  const socialsFooterContacts = rawSocialsFooter.map(line => {
+    const idx = line.indexOf(":");
+    return idx === -1 ? null : { label: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+  }).filter(Boolean);
+
   const data = {
     personal: {
       bio: document.getElementById("scBio").value.trim(),
@@ -721,6 +752,18 @@ async function saveSiteConfig() {
       socials,
       links,
       footerContacts,
+    },
+    about: {
+      image: document.getElementById("scAboutImage").value.trim() || "/personal/pfp.png",
+    },
+    socialsPage: {
+      icons: socialsIcons,
+      grid: socialsGrid,
+      socialImage: document.getElementById("scSocialImage").value.trim() || "",
+      footerContacts: socialsFooterContacts,
+    },
+    site: {
+      pfpImage: document.getElementById("scPfpImage").value.trim() || "/personal/pfp.png",
     },
     professional: (siteConfig && siteConfig.professional) || { bio: "", contacts: [] },
   };

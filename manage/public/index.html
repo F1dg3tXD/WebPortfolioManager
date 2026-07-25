@@ -33,11 +33,11 @@
         <div class="column-body" id="col-personal-avatar"></div>
       </div>
       <div class="column" data-category="professional-2d">
-        <div class="column-header">Professional <span class="dim-label">2D</span> <span class="column-count" id="count-professional-2d">0</span></div>
+        <div class="column-header">Game Art <span class="dim-label">2D</span> <span class="column-count" id="count-professional-2d">0</span></div>
         <div class="column-body" id="col-professional-2d"></div>
       </div>
       <div class="column" data-category="professional-3d">
-        <div class="column-header">Professional <span class="dim-label">3D</span> <span class="column-count" id="count-professional-3d">0</span></div>
+        <div class="column-header">Game Art <span class="dim-label">3D</span> <span class="column-count" id="count-professional-3d">0</span></div>
         <div class="column-body" id="col-professional-3d"></div>
       </div>
     </div>
@@ -69,6 +69,11 @@
     <div class="edit-panel">
       <h2 class="edit-panel-title">Site Config</h2>
       <form class="edit-form">
+        <label class="field-label">Site Logo / PFP <span class="field-note">nav and header image</span></label>
+        <input id="scPfpImage" type="url" class="text-input" placeholder="/personal/pfp.png" />
+
+        <hr class="divider" />
+
         <label class="field-label">Bio <span class="field-note">plain text</span></label>
         <textarea id="scBio" class="text-input textarea" rows="4"></textarea>
 
@@ -83,6 +88,25 @@
 
         <label class="field-label">Footer Contacts <span class="field-note">one per line: label: url</span></label>
         <textarea id="scFooter" class="text-input textarea" rows="3"></textarea>
+
+        <hr class="divider" />
+
+        <label class="field-label">About Image <span class="field-note">about page image URL</span></label>
+        <input id="scAboutImage" type="url" class="text-input" placeholder="/personal/pfp.png" />
+
+        <hr class="divider" />
+
+        <label class="field-label">Socials Page - Icons <span class="field-note">one per line: name: url</span></label>
+        <textarea id="scSocialsIcons" class="text-input textarea" rows="4"></textarea>
+
+        <label class="field-label">Socials Page - Grid <span class="field-note">one per line: name: url</span></label>
+        <textarea id="scSocialsGrid" class="text-input textarea" rows="4"></textarea>
+
+        <label class="field-label">Social Image <span class="field-note">socials page footer image</span></label>
+        <input id="scSocialImage" type="url" class="text-input" />
+
+        <label class="field-label">Socials Footer <span class="field-note">one per line: label: url</span></label>
+        <textarea id="scSocialsFooter" class="text-input textarea" rows="3"></textarea>
       </form>
       <div class="edit-actions">
         <button id="scCloseBtn" class="secondary-btn">Cancel</button>
