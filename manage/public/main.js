@@ -782,6 +782,673 @@ async function saveSiteConfig() {
   siteConfig = data;
 }
 
+// ── Style tab ──
+
+let styleBlocks = [];
+let styleSha = null;
+let styleDirty = false;
+let styleElements = null;
+
+function switchTab(name) {
+  document.querySelectorAll(".app-tab").forEach((t) => {
+    t.classList.toggle("app-tab--active", t.dataset.tab === name);
+  });
+  document.getElementById("panel-artdata").classList.toggle("tab-panel--active", name === "artdata");
+  document.getElementById("panel-style").classList.toggle("tab-panel--active", name === "style");
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[c]));
+}
+
+function parseCSS(css) {
+  const blocks = [];
+  let buffer = "";
+  let i = 0;
+  const n = css.length;
+
+  const flushBuffer = () => {
+    const t = buffer;
+    buffer = "";
+    if (t.trim()) {
+      blocks.push({ type: "comment", raw: t });
+    }
+  };
+
+  while (i < n) {
+    const ch = css[i];
+
+    if (ch === "/" && css[i + 1] === "*") {
+      const end = css.indexOf("*/", i + 2);
+      if (end === -1) { buffer += css.slice(i); break; }
+      buffer += css.slice(i, end + 2);
+      i = end + 2;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      const q = ch;
+      let j = i + 1;
+      while (j < n && css[j] !== q) {
+        if (css[j] === "\\") j++;
+        j++;
+      }
+      buffer += css.slice(i, Math.min(j + 1, n));
+      i = Math.min(j + 1, n);
+      continue;
+    }
+
+    if (ch === "{") {
+      const prelude = buffer;
+      buffer = "";
+
+      const comments = [];
+      const parts = [];
+      const re = /\/\*[\s\S]*?\*\//g;
+      let m;
+      let last = 0;
+      while ((m = re.exec(prelude))) {
+        if (m.index > last) parts.push(prelude.slice(last, m.index));
+        comments.push(m[0]);
+        last = m.index + m[0].length;
+      }
+      if (last < prelude.length) parts.push(prelude.slice(last));
+      for (const c of comments) blocks.push({ type: "comment", raw: c });
+      const selectorText = parts.join(" ");
+
+      let depth = 1;
+      let j = i + 1;
+      while (j < n && depth > 0) {
+        const c = css[j];
+        if (c === "/" && css[j + 1] === "*") {
+          j = css.indexOf("*/", j + 2);
+          if (j === -1) break;
+          j += 2;
+          continue;
+        }
+        if (c === "'" || c === '"') {
+          const q = c;
+          j++;
+          while (j < n && css[j] !== q) {
+            if (css[j] === "\\") j++;
+            j++;
+          }
+          j++;
+          continue;
+        }
+        if (c === "{") depth++;
+        else if (c === "}") depth--;
+        if (depth > 0) j++;
+      }
+      const end = Math.min(j, n);
+      const body = css.slice(i + 1, end);
+      const preludeTrim = selectorText.trim();
+      if (preludeTrim.startsWith("@")) {
+        blocks.push({ type: "atrule", prelude: preludeTrim, inner: body, raw: selectorText + "{" + body + "}", edited: false });
+      } else if (preludeTrim) {
+        blocks.push({ type: "rule", prelude: preludeTrim, inner: body, raw: selectorText + "{" + body + "}", edited: false });
+      }
+      i = end + 1;
+      continue;
+    }
+
+    buffer += ch;
+    i++;
+  }
+  flushBuffer();
+  return blocks;
+}
+
+function generateCSS(blocks) {
+  const parts = blocks.map((b) => {
+    if (b.edited) return `${b.prelude} {\n${b.inner.trim()}\n}`;
+    return b.raw.trim();
+  });
+  return parts.filter((p) => p).join("\n\n") + "\n";
+}
+
+function selectorTokens(selector) {
+  const classes = new Set();
+  const ids = new Set();
+  const tags = new Set();
+  const m1 = selector.match(/\.[A-Za-z_][A-Za-z0-9_-]*/g);
+  if (m1) m1.forEach((t) => classes.add(t));
+  const m2 = selector.match(/#[A-Za-z_][A-Za-z0-9_-]*/g);
+  if (m2) m2.forEach((t) => ids.add(t));
+  const m3 = selector.match(/(?:^|[\s>+~,(])([a-zA-Z][a-zA-Z0-9-]*)/g);
+  if (m3) m3.forEach((t) => tags.add(t.replace(/^[\s>+~,(]/, "")));
+  return { classes, ids, tags };
+}
+
+function ruleMatchesElement(block, element) {
+  if (block.type !== "rule") return false;
+  const { classes, ids, tags } = selectorTokens(block.prelude);
+  if (element.startsWith(".")) return classes.has(element);
+  if (element.startsWith("#")) return ids.has(element);
+  return tags.has(element);
+}
+
+async function loadStyle() {
+  const res = await fetch("/api/style");
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  styleSha = data.sha;
+  styleBlocks = parseCSS(data.content || "");
+  try {
+    await loadStyleElements();
+  } catch (e) {
+    console.warn("Could not scan site elements:", e);
+  }
+  renderStyleList();
+}
+
+async function loadStyleElements() {
+  const res = await fetch("/api/style/elements");
+  if (!res.ok) return;
+  styleElements = await res.json();
+}
+
+function getStyleElements() {
+  if (!styleElements) return [];
+  return [...(styleElements.classes || []), ...(styleElements.ids || []), ...(styleElements.tags || [])];
+}
+
+function createRuleItem(b) {
+  const item = document.createElement("div");
+  item.className = "style-rule";
+  const label = document.createElement("div");
+  label.className = "style-rule-prelude";
+  label.textContent = b.prelude;
+  label.title = b.prelude;
+  item.appendChild(label);
+  const ta = document.createElement("textarea");
+  ta.className = "text-input style-rule-input";
+  ta.spellcheck = false;
+  ta.value = b.inner.replace(/^\n+/, "").replace(/\n+\s*$/, "");
+  ta.addEventListener("input", () => {
+    b.edited = true;
+    b.inner = "\n" + ta.value + "\n";
+    styleDirty = true;
+    updateStyleSave();
+  });
+  item.appendChild(ta);
+  return item;
+}
+
+function createElementRow(m) {
+  const row = document.createElement("div");
+  row.className = "style-element";
+
+  const head = document.createElement("button");
+  head.className = "style-element-head";
+  head.innerHTML = `<span class="style-sel">${escapeHtml(m.element)}</span><span class="style-count">${m.rules.length}</span>`;
+  head.addEventListener("click", () => row.classList.toggle("open"));
+  row.appendChild(head);
+
+  const body = document.createElement("div");
+  body.className = "style-element-body";
+
+  if (m.rules.length) {
+    for (const b of m.rules) body.appendChild(createRuleItem(b));
+  } else {
+    const note = document.createElement("div");
+    note.className = "style-note";
+    note.textContent = "No rules in style.css for this element.";
+    body.appendChild(note);
+    const addBtn = document.createElement("button");
+    addBtn.className = "secondary-btn style-add-btn";
+    addBtn.textContent = "Add rule";
+    addBtn.addEventListener("click", () => {
+      styleBlocks.push({
+        type: "rule",
+        prelude: m.element,
+        inner: "\n  /* style " + m.element + " */\n",
+        raw: "",
+        edited: true,
+      });
+      styleDirty = true;
+      updateStyleSave();
+      renderStyleList();
+      row.classList.add("open");
+    });
+    body.appendChild(addBtn);
+  }
+
+  row.appendChild(body);
+  return row;
+}
+
+function renderStyleList() {
+  const list = document.getElementById("styleList");
+  list.innerHTML = "";
+  const filter = document.getElementById("styleFilter").value.trim().toLowerCase();
+  const elements = getStyleElements();
+
+  const matchedSet = new Set();
+  const matched = [];
+  for (const element of elements) {
+    const rules = styleBlocks.filter((b) => ruleMatchesElement(b, element));
+    rules.forEach((b) => matchedSet.add(b));
+    matched.push({ element, rules });
+  }
+
+  const isUniversalRule = (b) => {
+    if (b.type !== "rule") return false;
+    return b.prelude.replace(/\s+/g, "").split(",").every((s) => s === "*" || s === "*::before" || s === "*::after");
+  };
+  const others = styleBlocks.filter((b) => !matchedSet.has(b) && !isUniversalRule(b) && (b.type === "atrule" || b.type === "rule"));
+
+  const filtered = matched.filter((m) => !filter || m.element.toLowerCase().includes(filter));
+
+  if (!filtered.length) {
+    const empty = document.createElement("div");
+    empty.className = "style-note";
+    empty.textContent = "No matching elements.";
+    list.appendChild(empty);
+  }
+
+  for (const m of filtered) list.appendChild(createElementRow(m));
+
+  const filteredOthers = others.filter((b) => !filter || b.prelude.toLowerCase().includes(filter));
+  if (filteredOthers.length) {
+    const row = document.createElement("div");
+    row.className = "style-element";
+    const head = document.createElement("button");
+    head.className = "style-element-head";
+    head.innerHTML = `<span class="style-sel">Other blocks</span><span class="style-count">${filteredOthers.length}</span>`;
+    head.addEventListener("click", () => row.classList.toggle("open"));
+    row.appendChild(head);
+    const body = document.createElement("div");
+    body.className = "style-element-body";
+    for (const b of filteredOthers) body.appendChild(createRuleItem(b));
+    row.appendChild(body);
+    list.appendChild(row);
+  }
+}
+
+function updateStyleSave() {
+  document.getElementById("styleSaveBtn").disabled = !styleDirty;
+}
+
+async function saveStyle() {
+  const btn = document.getElementById("styleSaveBtn");
+  const status = document.getElementById("styleStatus");
+  btn.disabled = true;
+  status.textContent = "Pushing style.css to GitHub...";
+  status.className = "status-msg";
+  try {
+    const content = generateCSS(styleBlocks);
+    const res = await fetch("/api/style", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, sha: styleSha }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const result = await res.json();
+    styleSha = result.sha;
+    styleDirty = false;
+    styleBlocks.forEach((b) => { b.edited = false; });
+    renderStyleList();
+    status.textContent = `style.css saved! SHA: ${result.sha.slice(0, 7)}`;
+    status.className = "status-msg success";
+  } catch (e) {
+    status.textContent = `Error: ${e.message}`;
+    status.className = "status-msg error";
+    updateStyleSave();
+  }
+}
+
+// ── Style tab: preview, inspector, paste ──
+
+let inspected = null;
+let pastedElements = [];
+let selectedPreviewEl = null;
+
+function elementData(el) {
+  const tag = el.tagName ? el.tagName.toLowerCase() : "element";
+  const id = el.id || "";
+  const classes =
+    el.classList && typeof el.classList.contains === "function"
+      ? Array.from(el.classList)
+      : el.className && typeof el.className === "string"
+        ? el.className.trim().split(/\s+/).filter(Boolean)
+        : [];
+  const primary = id ? `#${id}` : classes[0] ? `.${classes[0]}` : tag;
+  return { tag, id, classes, primary };
+}
+
+function selectorPath(el) {
+  const parts = [];
+  let node = el;
+  while (node && node.nodeType === 1) {
+    const t = node.tagName.toLowerCase();
+    if (t === "html") break;
+    if (t === "body") {
+      parts.unshift("body");
+      break;
+    }
+    const id = node.id ? `#${node.id}` : "";
+    const cls =
+      node.classList && node.classList.length
+        ? "." + Array.from(node.classList).join(".")
+        : "";
+    parts.unshift(t + id + cls);
+    node = node.parentElement;
+  }
+  return parts.join(" > ");
+}
+
+function ensurePreviewStyles(doc) {
+  if (doc.getElementById("si-styles")) return;
+  const s = doc.createElement("style");
+  s.id = "si-styles";
+  s.textContent =
+    ".si-hover{outline:2px dashed #4dc9f6 !important;outline-offset:-2px}.si-selected{outline:2px solid #0990f7 !important;outline-offset:-2px;box-shadow:0 0 0 9999px rgba(9,144,247,.10) inset}";
+  (doc.head || doc.documentElement).appendChild(s);
+}
+
+function clearPreviewSelection(doc) {
+  if (!doc) return;
+  doc.querySelectorAll(".si-selected").forEach((el) => el.classList.remove("si-selected"));
+  selectedPreviewEl = null;
+}
+
+function wirePreviewInspector() {
+  const frame = document.getElementById("sitePreview");
+  if (!frame || !frame.contentDocument) return;
+  const doc = frame.contentDocument;
+  ensurePreviewStyles(doc);
+
+  doc.addEventListener(
+    "click",
+    (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const el = e.target;
+      if (!el || el.nodeType !== 1) return;
+      if (selectedPreviewEl) selectedPreviewEl.classList.remove("si-selected");
+      selectedPreviewEl = el;
+      el.classList.add("si-selected");
+      const data = elementData(el);
+      data.path = selectorPath(el);
+      renderInspector(data);
+    },
+    true
+  );
+
+  doc.addEventListener(
+    "mouseover",
+    (e) => {
+      const el = e.target;
+      if (!el || el.nodeType !== 1) return;
+      doc.querySelectorAll(".si-hover").forEach((n) => n !== el && n.classList.remove("si-hover"));
+      el.classList.add("si-hover");
+    },
+    true
+  );
+
+  doc.addEventListener("mouseout", (e) => {
+    const el = e.target;
+    if (el && el.nodeType === 1) el.classList.remove("si-hover");
+  });
+
+  doc.addEventListener("submit", (e) => e.preventDefault());
+}
+
+function switchInspectorTab(name) {
+  document.querySelectorAll(".inspector-tab").forEach((t) => {
+    t.classList.toggle("inspector-tab--active", t.dataset.itab === name);
+  });
+  document.getElementById("inspectorInspect").classList.toggle("inspector-body--active", name === "inspect");
+  document.getElementById("inspectorElements").classList.toggle("inspector-body--active", name === "elements");
+}
+
+function blockMatchesElementData(block, data) {
+  if (block.type !== "rule") return false;
+  const { classes, ids, tags } = selectorTokens(block.prelude);
+  if (data.id && ids.has(`#${data.id}`)) return true;
+  if (tags.has(data.tag)) return true;
+  return data.classes.some((c) => classes.has(`.${c}`));
+}
+
+function getMatchPriority(block, data) {
+  if (block.prelude.trim() === data.primary) return 0;
+  const { classes, ids, tags } = selectorTokens(block.prelude);
+  if (data.id && ids.has(`#${data.id}`)) return 1;
+  return 2;
+}
+
+function populateAttachSelect(selectedValue) {
+  const sel = document.getElementById("attachSelect");
+  sel.innerHTML = "";
+  const seen = new Set();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "Choose a rule to link this element to...";
+  sel.appendChild(empty);
+  for (const b of styleBlocks) {
+    if (b.type !== "rule") continue;
+    const pre = b.prelude.trim();
+    if (!pre || seen.has(pre)) continue;
+    seen.add(pre);
+    const opt = document.createElement("option");
+    opt.value = pre;
+    opt.textContent = pre.length > 80 ? pre.slice(0, 77) + "..." : pre;
+    sel.appendChild(opt);
+  }
+  sel.value = selectedValue || "";
+}
+
+function renderInspector(data) {
+  inspected = data;
+  document.getElementById("inspectorEmpty").style.display = "none";
+  document.getElementById("inspectorContent").hidden = false;
+
+  const summary = document.getElementById("inspectorSummary");
+  summary.innerHTML = "";
+  const tag = document.createElement("span");
+  tag.className = "inspector-tag";
+  tag.textContent = data.tag;
+  summary.appendChild(tag);
+  if (data.id) {
+    const id = document.createElement("span");
+    id.className = "inspector-chip";
+    id.textContent = `#${data.id}`;
+    summary.appendChild(id);
+  }
+  for (const c of data.classes) {
+    const chip = document.createElement("span");
+    chip.className = "inspector-chip";
+    chip.textContent = `.${c}`;
+    summary.appendChild(chip);
+  }
+  const path = document.createElement("div");
+  path.className = "inspector-path";
+  path.textContent = data.path || "";
+  summary.appendChild(path);
+
+  const matches = styleBlocks
+    .filter((b) => blockMatchesElementData(b, data))
+    .sort((a, b) => getMatchPriority(a, data) - getMatchPriority(b, data));
+
+  const matchBox = document.getElementById("inspectorMatches");
+  matchBox.innerHTML = "";
+  if (!matches.length) {
+    const note = document.createElement("div");
+    note.className = "inspector-note";
+    note.textContent = "No existing rules match this element yet.";
+    matchBox.appendChild(note);
+  }
+  for (const b of matches) matchBox.appendChild(createRuleItem(b));
+
+  populateAttachSelect("");
+  document.getElementById("newRuleSel").value = data.primary;
+}
+
+function attachToRule(data) {
+  const sel = document.getElementById("attachSelect").value;
+  if (!sel) return;
+  const block = styleBlocks.find((b) => b.type === "rule" && b.prelude.trim() === sel);
+  if (!block) return;
+  const tokens = selectorTokens(block.prelude);
+  const target = data.primary;
+  if (target.startsWith("#") ? tokens.ids.has(target) : target.startsWith(".") ? tokens.classes.has(target) : tokens.tags.has(target)) {
+    const status = document.getElementById("styleStatus");
+    status.textContent = `Element already covered by ${sel}`;
+    status.className = "status-msg error";
+    return;
+  }
+  block.prelude = block.prelude.trim() + ", " + target;
+  block.edited = true;
+  styleDirty = true;
+  updateStyleSave();
+  renderInspector(data);
+  renderStyleList();
+}
+
+function addNewRule(data) {
+  const sel = document.getElementById("newRuleSel").value.trim() || data.primary;
+  const exists = styleBlocks.some((b) => b.type === "rule" && b.prelude.trim() === sel);
+  if (exists) {
+    const status = document.getElementById("styleStatus");
+    status.textContent = `A rule for ${sel} already exists`;
+    status.className = "status-msg error";
+    return;
+  }
+  styleBlocks.push({
+    type: "rule",
+    prelude: sel,
+    inner: "\n  /* style " + sel + " */\n",
+    raw: "",
+    edited: true,
+  });
+  styleDirty = true;
+  updateStyleSave();
+  renderInspector(data);
+  renderStyleList();
+}
+
+function openPasteModal() {
+  document.getElementById("pasteInput").value = "";
+  document.getElementById("pasteOverlay").style.display = "flex";
+  document.getElementById("pasteInput").focus();
+}
+
+function closePasteModal() {
+  document.getElementById("pasteOverlay").style.display = "none";
+}
+
+function parsePastedHtml() {
+  const raw = document.getElementById("pasteInput").value;
+  if (!raw.trim()) return;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(raw, "text/html");
+  const els = doc.body ? doc.body.querySelectorAll("*") : [];
+  const added = new Set();
+  let count = 0;
+  let firstIdx = pastedElements.length;
+  for (const el of els) {
+    const data = elementData(el);
+    data.path = selectorPath(el);
+    const sig = data.tag + (data.id ? "#" + data.id : "") + data.classes.map((c) => "." + c).join("");
+    if (added.has(sig)) continue;
+    added.add(sig);
+    pastedElements.push(data);
+    count++;
+  }
+  if (!count) {
+    const status = document.getElementById("styleStatus");
+    status.textContent = "No elements found in pasted HTML";
+    status.className = "status-msg error";
+    return;
+  }
+  closePasteModal();
+  document.getElementById("pastedStrip").hidden = false;
+  renderPasted();
+  switchInspectorTab("inspect");
+  renderInspector(pastedElements[firstIdx]);
+  const status = document.getElementById("styleStatus");
+  status.textContent = `${count} elements added from pasted HTML (temporary)`;
+  status.className = "status-msg success";
+}
+
+function renderPasted() {
+  const chips = document.getElementById("pastedChips");
+  chips.innerHTML = "";
+  pastedElements.forEach((data, i) => {
+    const chip = document.createElement("button");
+    chip.className = "pasted-chip";
+    chip.innerHTML = `<span class="inspector-tag">${escapeHtml(data.tag)}</span>${data.id ? `<span class="inspector-chip">#${escapeHtml(data.id)}</span>` : ""}${data.classes.length ? `<span class="inspector-chip">.${escapeHtml(data.classes.join("."))}</span>` : ""}`;
+    chip.title = data.path || "";
+    chip.addEventListener("click", () => {
+      switchInspectorTab("inspect");
+      renderInspector(data);
+    });
+    chips.appendChild(chip);
+  });
+}
+
+function loadPreviewPage(path) {
+  const frame = document.getElementById("sitePreview");
+  if (!frame) return;
+  clearPreviewSelection(frame.contentDocument);
+  inspected = null;
+  document.getElementById("inspectorContent").hidden = true;
+  document.getElementById("inspectorEmpty").style.display = "block";
+  frame.src = `/repo/${path}`;
+}
+
+function initStyleTab() {
+  document.querySelectorAll(".app-tab").forEach((t) => {
+    t.addEventListener("click", () => switchTab(t.dataset.tab));
+  });
+  document.getElementById("styleSaveBtn").addEventListener("click", saveStyle);
+  document.getElementById("styleFilter").addEventListener("input", renderStyleList);
+  document.getElementById("refreshElementsBtn").addEventListener("click", async () => {
+    const status = document.getElementById("styleStatus");
+    status.textContent = "Rescanning site elements...";
+    status.className = "status-msg";
+    try {
+      await loadStyleElements();
+      renderStyleList();
+      status.textContent = `${getStyleElements().length} elements scanned`;
+      status.className = "status-msg success";
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.className = "status-msg error";
+    }
+  });
+
+  const preview = document.getElementById("sitePreview");
+  preview.addEventListener("load", wirePreviewInspector);
+  document.getElementById("previewPage").addEventListener("change", (e) => {
+    loadPreviewPage(e.target.value);
+  });
+
+  document.querySelectorAll(".inspector-tab").forEach((t) => {
+    t.addEventListener("click", () => switchInspectorTab(t.dataset.itab));
+  });
+  document.getElementById("attachBtn").addEventListener("click", () => inspected && attachToRule(inspected));
+  document.getElementById("newRuleBtn").addEventListener("click", () => inspected && addNewRule(inspected));
+
+  document.getElementById("pasteHtmlBtn").addEventListener("click", openPasteModal);
+  document.getElementById("pasteCloseBtn").addEventListener("click", closePasteModal);
+  document.getElementById("pasteOverlayBg").addEventListener("click", closePasteModal);
+  document.getElementById("pasteParseBtn").addEventListener("click", parsePastedHtml);
+}
+
 async function init() {
   const status = document.getElementById("statusMsg");
   const saveBtn = document.getElementById("saveBtn");
@@ -801,10 +1468,20 @@ async function init() {
     } catch (e) {
       console.warn("Could not load site config:", e);
     }
+    const styleStatus = document.getElementById("styleStatus");
+    try {
+      await loadStyle();
+      styleStatus.textContent = `${getStyleElements().length} elements · ${styleBlocks.length} rules`;
+      styleStatus.className = "status-msg success";
+    } catch (e) {
+      styleStatus.textContent = `Error: ${e.message}`;
+      styleStatus.className = "status-msg error";
+    }
 
   setupColumns();
   createContextMenu();
   initCropInteraction();
+  initStyleTab();
 
   document.querySelectorAll("#editForm .toggle-group").forEach((group) => {
     const buttons = group.querySelectorAll(".toggle");

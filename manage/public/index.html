@@ -8,37 +8,129 @@
 </head>
 <body>
   <div class="app">
-    <div class="topbar">
-      <h1 class="topbar-title">Manage Art</h1>
-      <div class="topbar-right">
-        <span id="statusMsg" class="status-msg"></span>
-        <button id="siteConfigBtn" class="secondary-btn" title="Edit site config" style="font-size:11px;padding:5px 10px">Site Config</button>
-        <button id="settingsBtn" class="icon-btn" title="Settings">&#9881;</button>
-        <button id="addBtn" class="add-btn" title="Add new artwork">+</button>
-        <button id="saveBtn" class="commit-btn" disabled>Save Changes</button>
+    <div class="app-tabs">
+      <button class="app-tab app-tab--active" data-tab="artdata">Art Data</button>
+      <button class="app-tab" data-tab="style">Style</button>
+    </div>
+
+    <div class="tab-panel tab-panel--active" id="panel-artdata">
+      <div class="topbar">
+        <h1 class="topbar-title">Manage Art</h1>
+        <div class="topbar-right">
+          <span id="statusMsg" class="status-msg"></span>
+          <button id="siteConfigBtn" class="secondary-btn" title="Edit site config" style="font-size:11px;padding:5px 10px">Site Config</button>
+          <button id="settingsBtn" class="icon-btn" title="Settings">&#9881;</button>
+          <button id="addBtn" class="add-btn" title="Add new artwork">+</button>
+          <button id="saveBtn" class="commit-btn" disabled>Save Changes</button>
+        </div>
+      </div>
+
+      <div class="columns" id="columns">
+        <div class="column" data-category="personal-2d">
+          <div class="column-header">Personal <span class="dim-label">2D</span> <span class="column-count" id="count-personal-2d">0</span></div>
+          <div class="column-body" id="col-personal-2d"></div>
+        </div>
+        <div class="column" data-category="personal-3d">
+          <div class="column-header">Personal <span class="dim-label">3D</span> <span class="column-count" id="count-personal-3d">0</span></div>
+          <div class="column-body" id="col-personal-3d"></div>
+        </div>
+        <div class="column" data-category="personal-avatar">
+          <div class="column-header">Personal <span class="dim-label">Avatar</span> <span class="column-count" id="count-personal-avatar">0</span></div>
+          <div class="column-body" id="col-personal-avatar"></div>
+        </div>
+        <div class="column" data-category="professional-2d">
+          <div class="column-header">Game Art <span class="dim-label">2D</span> <span class="column-count" id="count-professional-2d">0</span></div>
+          <div class="column-body" id="col-professional-2d"></div>
+        </div>
+        <div class="column" data-category="professional-3d">
+          <div class="column-header">Game Art <span class="dim-label">3D</span> <span class="column-count" id="count-professional-3d">0</span></div>
+          <div class="column-body" id="col-professional-3d"></div>
+        </div>
       </div>
     </div>
 
-    <div class="columns" id="columns">
-      <div class="column" data-category="personal-2d">
-        <div class="column-header">Personal <span class="dim-label">2D</span> <span class="column-count" id="count-personal-2d">0</span></div>
-        <div class="column-body" id="col-personal-2d"></div>
+    <div class="tab-panel" id="panel-style">
+      <iframe id="styleBackground" class="style-background" src="/api/background" title="Water background" aria-hidden="true"></iframe>
+      <div class="style-panel">
+        <div class="style-topbar">
+          <h1 class="style-title">Style Editor</h1>
+          <div class="style-topbar-center">
+            <select id="previewPage" class="text-input preview-select" title="Preview page">
+              <option value="home/index.html">Home</option>
+              <option value="about/index.html">About</option>
+              <option value="personal/index.html">Portfolio</option>
+              <option value="game-art/index.html">Game Art</option>
+            </select>
+            <button id="pasteHtmlBtn" class="secondary-btn">Paste HTML</button>
+            <button id="refreshElementsBtn" class="secondary-btn" title="Rescan site elements">Refresh</button>
+          </div>
+          <div class="topbar-right">
+            <span id="styleStatus" class="status-msg"></span>
+            <button id="styleSaveBtn" class="commit-btn" disabled>Save to GitHub</button>
+          </div>
+        </div>
+
+        <div class="style-workspace">
+          <div class="preview-col">
+            <div class="preview-hint">Click an element in the preview to inspect it</div>
+            <div class="preview-frame-wrap">
+              <iframe id="sitePreview" class="site-preview" src="/repo/home/index.html" title="Site preview"></iframe>
+            </div>
+            <div class="pasted-strip" id="pastedStrip" hidden>
+              <div class="pasted-label">Pasted HTML</div>
+              <div class="pasted-chips" id="pastedChips"></div>
+            </div>
+          </div>
+
+          <div class="inspector-col">
+            <div class="inspector-tabs">
+              <button class="inspector-tab inspector-tab--active" data-itab="inspect">Inspector</button>
+              <button class="inspector-tab" data-itab="elements">Elements</button>
+            </div>
+
+            <div class="inspector-body inspector-body--active" id="inspectorInspect">
+              <div class="inspector-empty" id="inspectorEmpty">Click an element in the preview, or paste HTML to style it.</div>
+              <div id="inspectorContent" hidden>
+                <div class="inspector-summary" id="inspectorSummary"></div>
+
+                <div class="inspector-section-title">Matched rules</div>
+                <div class="inspector-matches" id="inspectorMatches"></div>
+
+                <div class="inspector-section-title">Link to existing rule</div>
+                <div class="inspector-row">
+                  <select id="attachSelect" class="text-input attach-select"></select>
+                  <button id="attachBtn" class="secondary-btn">Attach</button>
+                </div>
+                <div class="inspector-note">Adds this element's selector to the chosen rule so it inherits those styles.</div>
+
+                <div class="inspector-section-title">New rule for this element</div>
+                <div class="inspector-row">
+                  <input id="newRuleSel" type="text" class="text-input newrule-select" spellcheck="false" />
+                  <button id="newRuleBtn" class="secondary-btn">Add rule</button>
+                </div>
+                <div class="inspector-note">Creates a brand-new rule with the selector shown. Edit its body after it appears below.</div>
+              </div>
+            </div>
+
+            <div class="inspector-body" id="inspectorElements">
+              <input id="styleFilter" type="text" class="text-input style-filter" placeholder="Filter elements..." autocomplete="off" />
+              <div class="style-list" id="styleList"></div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="column" data-category="personal-3d">
-        <div class="column-header">Personal <span class="dim-label">3D</span> <span class="column-count" id="count-personal-3d">0</span></div>
-        <div class="column-body" id="col-personal-3d"></div>
-      </div>
-      <div class="column" data-category="personal-avatar">
-        <div class="column-header">Personal <span class="dim-label">Avatar</span> <span class="column-count" id="count-personal-avatar">0</span></div>
-        <div class="column-body" id="col-personal-avatar"></div>
-      </div>
-      <div class="column" data-category="professional-2d">
-        <div class="column-header">Game Art <span class="dim-label">2D</span> <span class="column-count" id="count-professional-2d">0</span></div>
-        <div class="column-body" id="col-professional-2d"></div>
-      </div>
-      <div class="column" data-category="professional-3d">
-        <div class="column-header">Game Art <span class="dim-label">3D</span> <span class="column-count" id="count-professional-3d">0</span></div>
-        <div class="column-body" id="col-professional-3d"></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="pasteOverlay" style="display:none">
+    <div class="overlay-bg" id="pasteOverlayBg"></div>
+    <div class="edit-panel paste-panel">
+      <h2 class="edit-panel-title">Paste HTML</h2>
+      <p class="paste-hint">Paste HTML to inspect and style its elements. Pasted elements are temporary and are never written into the site pages.</p>
+      <textarea id="pasteInput" class="text-input textarea" rows="8" spellcheck="false" placeholder="<div class=&quot;my-thing&quot;>...</div>"></textarea>
+      <div class="edit-actions">
+        <button id="pasteCloseBtn" class="secondary-btn">Cancel</button>
+        <button id="pasteParseBtn" class="primary-btn">Parse &amp; Add</button>
       </div>
     </div>
   </div>
