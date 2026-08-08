@@ -1,4 +1,5 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from "fs";
+import { exec } from "child_process";
 import { homedir } from "os";
 import { join, dirname } from "path";
 import express from "express";
@@ -429,11 +430,26 @@ app.post("/api/commit", async (req, res) => {
 
 const PORT = process.env.PORT || 3322;
 
+// Opens the default browser. Uses plain child_process instead of an npm
+// package so it works inside the packaged single-file executable (SEA) on
+// Windows, where dynamic imports of external modules cannot be resolved.
+function openBrowser(url) {
+  const platform = process.platform;
+  const onErr = () => {};
+  if (platform === "win32") {
+    exec(`start "" "${url}"`, { shell: "cmd.exe" }, onErr);
+  } else if (platform === "darwin") {
+    exec(`open "${url}"`, onErr);
+  } else {
+    exec(`xdg-open "${url}"`, onErr);
+  }
+}
+
 app.listen(PORT, () => {
   const url = `http://localhost:${PORT}`;
   console.log(`Manage app running at ${url}`);
   if (!config.githubToken) {
     console.log("No GitHub token configured. Open the app and click the gear icon to set it up.");
   }
-  import("open").then((m) => m.default(url)).catch(() => {});
+  if (process.env.NO_OPEN !== "1") openBrowser(url);
 });
