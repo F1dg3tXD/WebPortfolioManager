@@ -11,6 +11,7 @@
     <div class="app-tabs">
       <button class="app-tab app-tab--active" data-tab="artdata">Art Data</button>
       <button class="app-tab" data-tab="style">Style</button>
+      <button class="app-tab" data-tab="background">Background</button>
     </div>
 
     <div class="tab-panel tab-panel--active" id="panel-artdata">
@@ -62,6 +63,7 @@
               <option value="game-art/index.html">Game Art</option>
             </select>
             <button id="pasteHtmlBtn" class="secondary-btn">Paste HTML</button>
+            <button id="styleValuesBtn" class="secondary-btn" title="Show exact numbers">Values</button>
             <button id="refreshElementsBtn" class="secondary-btn" title="Rescan site elements">Refresh</button>
           </div>
           <div class="topbar-right">
@@ -72,7 +74,7 @@
 
         <div class="style-workspace">
           <div class="preview-col">
-            <div class="preview-hint">Click an element in the preview to inspect it</div>
+            <div class="preview-hint">Click an element in the preview to edit it</div>
             <div class="preview-frame-wrap">
               <iframe id="sitePreview" class="site-preview" src="/repo/home/index.html" title="Site preview"></iframe>
             </div>
@@ -84,8 +86,8 @@
 
           <div class="inspector-col">
             <div class="inspector-tabs">
-              <button class="inspector-tab inspector-tab--active" data-itab="inspect">Inspector</button>
-              <button class="inspector-tab" data-itab="elements">Elements</button>
+              <button class="inspector-tab inspector-tab--active" data-itab="inspect">Edit</button>
+              <button class="inspector-tab" data-itab="elements">Rules &amp; Code</button>
             </div>
 
             <div class="inspector-body inspector-body--active" id="inspectorInspect">
@@ -93,7 +95,16 @@
               <div id="inspectorContent" hidden>
                 <div class="inspector-summary" id="inspectorSummary"></div>
 
-                <div class="inspector-section-title">Matched rules</div>
+                <div class="inspector-section-title">Colors</div>
+                <div class="prop-group" id="propColors"></div>
+
+                <div class="inspector-section-title">Text</div>
+                <div class="prop-group" id="propText"></div>
+
+                <div class="inspector-section-title">Shape</div>
+                <div class="prop-group" id="propShape"></div>
+
+                <div class="inspector-section-title">Applied rules</div>
                 <div class="inspector-matches" id="inspectorMatches"></div>
 
                 <div class="inspector-section-title">Link to existing rule</div>
@@ -108,7 +119,6 @@
                   <input id="newRuleSel" type="text" class="text-input newrule-select" spellcheck="false" />
                   <button id="newRuleBtn" class="secondary-btn">Add rule</button>
                 </div>
-                <div class="inspector-note">Creates a brand-new rule with the selector shown. Edit its body after it appears below.</div>
               </div>
             </div>
 
@@ -117,6 +127,65 @@
               <div class="style-list" id="styleList"></div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="panel-background">
+      <div class="bg-topbar">
+        <h1 class="style-title">Background Animation</h1>
+        <div class="style-topbar-center">
+          <div id="bgColorWrap"></div>
+          <button id="bgLoopBtn" class="secondary-btn" title="Loop the animation">Loop</button>
+          <button id="bgValuesBtn" class="secondary-btn" title="Show exact numbers">Values</button>
+          <div class="bg-value-row" id="bgValueRow" hidden>
+            <label class="bg-value-field">Seconds
+              <input id="bgDuration" type="number" class="text-input bg-num" min="0.5" max="120" step="0.5" />
+            </label>
+            <label class="bg-value-field">Frames/sec
+              <input id="bgFps" type="number" class="text-input bg-num" min="1" max="60" step="1" />
+            </label>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <span id="bgStatus" class="status-msg"></span>
+          <button id="bgSaveBtn" class="commit-btn" disabled>Save to GitHub</button>
+        </div>
+      </div>
+
+      <div class="bg-workspace">
+        <div class="bg-preview-col">
+          <div class="bg-canvas-wrap">
+            <canvas id="bgPreview" class="bg-preview"></canvas>
+            <div class="bg-canvas-empty" id="bgCanvasEmpty">Add an image below to start animating</div>
+          </div>
+          <div class="bg-transport">
+            <button id="bgPlayBtn" class="bg-play-btn" title="Play / pause">&#9654;</button>
+            <span id="bgTimeLabel" class="bg-time">0.0s / 12.0s</span>
+            <button id="bgAddKeyBtn" class="secondary-btn" title="Add a keyframe at the playhead">+ Key</button>
+            <button id="bgDelKeyBtn" class="secondary-btn" title="Remove the selected keyframe" disabled>Remove key</button>
+          </div>
+        </div>
+
+        <div class="bg-layers-col">
+          <div class="inspector-section-title">Layers</div>
+          <button id="bgAddLayerBtn" class="secondary-btn bg-add-layer">+ Add image</button>
+          <input id="bgFileInput" type="file" accept="image/*" hidden />
+          <div class="bg-layer-list" id="bgLayerList"></div>
+        </div>
+      </div>
+
+      <div class="bg-timeline">
+        <div class="bg-scrub" id="bgScrub">
+          <div class="bg-ruler-row">
+            <div class="bg-track-label bg-track-label--ruler">Timeline</div>
+            <div class="bg-ruler" id="bgRuler"></div>
+          </div>
+          <div id="bgTracks"></div>
+          <div class="bg-playhead" id="bgPlayhead"><div class="bg-playhead-handle"></div></div>
+        </div>
+        <div class="bg-key-editor" id="bgKeyEditor" hidden>
+          <div id="bgKeySliderWrap" class="bg-key-slider-wrap"></div>
         </div>
       </div>
     </div>
@@ -132,6 +201,15 @@
         <button id="pasteCloseBtn" class="secondary-btn">Cancel</button>
         <button id="pasteParseBtn" class="primary-btn">Parse &amp; Add</button>
       </div>
+    </div>
+  </div>
+
+  <div id="colorPopover" class="color-popover" hidden>
+    <canvas id="colorWheel" class="color-wheel" width="140" height="140"></canvas>
+    <div class="color-bright" id="colorBright"></div>
+    <div class="color-popover-footer">
+      <span id="colorHexLabel" class="color-hex" hidden></span>
+      <button id="colorClearBtn" class="secondary-btn">Transparent</button>
     </div>
   </div>
 

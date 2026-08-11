@@ -48,7 +48,7 @@ loadConfig();
 const app = express();
 const publicDir = findPublicDir();
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "60mb" }));
 app.use(express.static(publicDir));
 
 let currentSha = null;
@@ -319,6 +319,77 @@ app.get("/api/background-image", async (req, res) => {
     if (!response.ok) return res.status(response.status).end();
     const buf = Buffer.from(await response.arrayBuffer());
     res.type("image/jpeg").send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Background editor ──
+
+// Editor state for the background timeline. The generated background.json is
+// what the site's background/main.js loads at runtime; the editor reads it
+// back (via raw, no rate limit) so the client's animation is restored.
+app.get("/api/background/config", async (req, res) => {
+  try {
+    const api = `https://raw.githubusercontent.com/${config.repo}/main/background/background.json`;
+    let response = await fetch(api);
+    if (response.status === 404) {
+      response = await fetch(`https://raw.githubusercontent.com/${config.repo}/master/background/background.json`);
+    }
+    if (response.ok) {
+      return res.json({ config: JSON.parse(await response.text()) });
+    }
+    if (response.status === 404) {
+      return res.json({ config: null });
+    }
+    return res.status(response.status).json({ error: `HTTP ${response.status}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pushes one or more files into the repo's background/ folder. Each entry is
+// { path, content, encoding: "utf8" | "base64" }. The current blob SHA is
+// fetched per file so updates replace, not conflict.
+app.put("/api/background/save", async (req, res) => {
+  try {
+    const { files, message } = req.body || {};
+    if (!Array.isArray(files) || !files.length) {
+      return res.status(400).json({ error: "files array is required" });
+    }
+    const results = [];
+    for (const f of files) {
+      const path = String(f.path || "");
+      if (!path.startsWith("background/")) {
+        return res.status(400).json({ error: `path must be inside background/: ${path}` });
+      }
+      const enc = f.encoding === "base64" ? "base64" : "utf8";
+      const content = enc === "base64"
+        ? String(f.content || "")
+        : Buffer.from(String(f.content || ""), "utf-8").toString("base64");
+
+      const infoApi = `https://api.github.com/repos/${config.repo}/contents/${path}`;
+      const infoRes = await fetch(infoApi, { headers: getAuthHeaders() });
+      const sha = infoRes.ok ? (await infoRes.json()).sha : undefined;
+
+      const body = {
+        message: message || "Update background from manage page",
+        content,
+        sha,
+      };
+      const putRes = await fetch(infoApi, {
+        method: "PUT",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!putRes.ok) {
+        const err = await putRes.json();
+        return res.status(putRes.status).json({ error: `${path}: ${err.message}` });
+      }
+      const result = await putRes.json();
+      results.push({ path, sha: result.content.sha });
+    }
+    res.json({ files: results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
