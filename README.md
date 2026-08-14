@@ -15,3 +15,11 @@ run ```npm start```
 
 run ```npm run build```
 
+## ArtStation access:
+
+"Add from ArtStation" and "Update from JSON" fetch Cloudflare-protected
+ArtStation pages through a headless Chromium browser. The server looks for
+an installed Edge/Chrome/Chromium/Brave automatically, or use the
+`AS_BROWSER` env var / `artstationBrowser` in `~/.manage-app/config.json`
+to point at a specific executable.
+

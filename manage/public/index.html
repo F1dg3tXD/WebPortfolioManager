@@ -21,7 +21,14 @@
           <span id="statusMsg" class="status-msg"></span>
           <button id="siteConfigBtn" class="secondary-btn" title="Edit site config" style="font-size:11px;padding:5px 10px">Site Config</button>
           <button id="settingsBtn" class="icon-btn" title="Settings">&#9881;</button>
-          <button id="addBtn" class="add-btn" title="Add new artwork">+</button>
+          <div class="add-dropdown">
+            <button id="addBtn" class="add-btn" title="Add new artwork" aria-haspopup="menu">+</button>
+            <div class="add-menu" id="addMenu" role="menu" hidden>
+              <button class="add-menu-item" id="addNewItem" role="menuitem">New Entry</button>
+              <button class="add-menu-item" id="addArtstationItem" role="menuitem">Add from ArtStation</button>
+              <button class="add-menu-item" id="addJsonItem" role="menuitem">Update from JSON</button>
+            </div>
+          </div>
           <button id="saveBtn" class="commit-btn" disabled>Save Changes</button>
         </div>
       </div>
@@ -382,6 +389,40 @@
       <div class="edit-actions">
         <button id="editCloseBtn" class="secondary-btn">Cancel</button>
         <button id="editSaveBtn" class="primary-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="artstationOverlay" style="display:none">
+    <div class="overlay-bg" id="artstationOverlayBg"></div>
+    <div class="edit-panel">
+      <h2 class="edit-panel-title">Add from ArtStation</h2>
+      <p class="paste-hint">Paste an ArtStation artwork link. The entry will be prefilled from the post — review the details, then click Save.</p>
+      <input id="asUrlInput" type="url" class="text-input" placeholder="https://www.artstation.com/artwork/..." autocomplete="off" spellcheck="false" />
+      <div id="asStatus" class="status-msg"></div>
+      <div class="edit-actions">
+        <button id="asCloseBtn" class="secondary-btn">Cancel</button>
+        <button id="asFetchBtn" class="primary-btn">Fetch &amp; Add</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="jsonOverlay" style="display:none">
+    <div class="overlay-bg" id="jsonOverlayBg"></div>
+    <div class="edit-panel">
+      <h2 class="edit-panel-title">Update from JSON</h2>
+      <p class="paste-hint">Paste a URL to a projects.json file (ArtStation URLs work), or upload the file. Full-size images are then fetched automatically from each project's source link.</p>
+      <label class="field-label">JSON URL</label>
+      <input id="jsonUrlInput" type="url" class="text-input" placeholder="https://raw.githubusercontent.com/.../projects.json" autocomplete="off" spellcheck="false" />
+      <div class="json-file-row">
+        <button id="jsonFileBtn" class="secondary-btn">Choose file</button>
+        <span id="jsonFileName" class="json-file-name">No file selected</span>
+        <input id="jsonFileInput" type="file" accept=".json,application/json" hidden />
+      </div>
+      <div id="jsonStatus" class="status-msg"></div>
+      <div class="edit-actions">
+        <button id="jsonCloseBtn" class="secondary-btn">Cancel</button>
+        <button id="jsonApplyBtn" class="primary-btn">Update Data</button>
       </div>
     </div>
   </div>

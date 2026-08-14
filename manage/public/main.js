@@ -1,5 +1,6 @@
 let artData = [];
 let currentEditIdx = -1;
+let currentEditId = "";
 let dirty = false;
 let clipboard = null;
 let contextMenuTargetIdx = -1;
@@ -364,10 +365,11 @@ function handleContextAction(action) {
   }
 }
 
-function openEdit(idx) {
+function openEdit(idx, prefill = null) {
   currentEditIdx = idx;
   const isNew = idx < 0 || idx >= artData.length;
   const entry = isNew ? null : artData[idx];
+  currentEditId = isNew && prefill && prefill.id ? prefill.id : "";
 
   document.getElementById("editPanelTitle").textContent = isNew ? "New Entry" : "Edit Details";
 
@@ -394,6 +396,22 @@ function openEdit(idx) {
     workTypeToggles[0].classList.add("active");
     dimToggles.forEach((b) => b.classList.remove("active"));
     dimToggles[0].classList.add("active");
+
+    if (prefill) {
+      document.getElementById("editTitle").value = prefill.title || "";
+      document.getElementById("editDescription").value = prefill.description || "";
+      document.getElementById("editTags").value = (prefill.tags || []).join(", ");
+      document.getElementById("editSourceLink").value = prefill.sourceLink || "";
+      document.getElementById("editImages").value = (prefill.images || []).join("\n");
+      document.getElementById("editThumbnail").value = prefill.thumbnail || "";
+      document.getElementById("editIsAvatarCheck").checked = !!prefill.isAvatar;
+      const hasEmbed = !!(prefill.embed && prefill.embed.trim());
+      document.getElementById("editIncludeEmbed").checked = hasEmbed;
+      document.getElementById("editEmbedCode").value = prefill.embed || "";
+      document.getElementById("editEmbedRow").style.display = hasEmbed ? "block" : "none";
+      workTypeToggles.forEach((b) => b.classList.toggle("active", b.dataset.value === (prefill.type || "personal")));
+      dimToggles.forEach((b) => b.classList.toggle("active", b.dataset.value === String(!!prefill.is3D)));
+    }
   } else {
     document.getElementById("editTitle").value = entry.title || "";
     document.getElementById("editDescription").value = entry.description || "";
@@ -469,7 +487,7 @@ function saveEdit() {
     .filter((t) => t);
 
   if (isNew) {
-    artData.push({ type, is3D, isAvatar, title, description, tags, sourceLink, images, embed, thumbnail, thumbnailCrop });
+    artData.push({ id: currentEditId || undefined, type, is3D, isAvatar, title, description, tags, sourceLink, images, embed, thumbnail, thumbnailCrop });
   } else {
     const entry = artData[currentEditIdx];
     entry.type = type;
@@ -663,6 +681,34 @@ function openSettings() {
 
 function closeSettings() {
   document.getElementById("settingsOverlay").style.display = "none";
+}
+
+function openArtstationOverlay() {
+  document.getElementById("asUrlInput").value = "";
+  const statusEl = document.getElementById("asStatus");
+  statusEl.textContent = "";
+  statusEl.className = "status-msg";
+  document.getElementById("artstationOverlay").style.display = "flex";
+  document.getElementById("asUrlInput").focus();
+}
+
+function closeArtstationOverlay() {
+  document.getElementById("artstationOverlay").style.display = "none";
+}
+
+function openJsonOverlay() {
+  document.getElementById("jsonUrlInput").value = "";
+  document.getElementById("jsonFileInput").value = "";
+  document.getElementById("jsonFileName").textContent = "No file selected";
+  const statusEl = document.getElementById("jsonStatus");
+  statusEl.textContent = "";
+  statusEl.className = "status-msg";
+  document.getElementById("jsonOverlay").style.display = "flex";
+  document.getElementById("jsonUrlInput").focus();
+}
+
+function closeJsonOverlay() {
+  document.getElementById("jsonOverlay").style.display = "none";
 }
 
 let siteConfig = null;
@@ -3113,7 +3159,138 @@ async function init() {
     });
   });
 
-  document.getElementById("addBtn").addEventListener("click", () => openEdit(-1));
+  document.getElementById("addBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const menu = document.getElementById("addMenu");
+    menu.hidden = !menu.hidden;
+  });
+
+  document.addEventListener("click", (e) => {
+    const wrap = document.getElementById("addBtn").closest(".add-dropdown");
+    if (wrap && !wrap.contains(e.target)) {
+      document.getElementById("addMenu").hidden = true;
+    }
+  });
+
+  document.getElementById("addNewItem").addEventListener("click", () => {
+    document.getElementById("addMenu").hidden = true;
+    openEdit(-1);
+  });
+
+  document.getElementById("addArtstationItem").addEventListener("click", () => {
+    document.getElementById("addMenu").hidden = true;
+    openArtstationOverlay();
+  });
+
+  document.getElementById("artstationOverlayBg").addEventListener("click", closeArtstationOverlay);
+  document.getElementById("asCloseBtn").addEventListener("click", closeArtstationOverlay);
+  document.getElementById("asFetchBtn").addEventListener("click", async () => {
+    const input = document.getElementById("asUrlInput");
+    const statusEl = document.getElementById("asStatus");
+    const btn = document.getElementById("asFetchBtn");
+    const url = input.value.trim();
+    if (!url) {
+      statusEl.textContent = "Paste an ArtStation artwork link first.";
+      statusEl.className = "status-msg error";
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "Fetching...";
+    statusEl.textContent = "Fetching artwork from ArtStation...";
+    statusEl.className = "status-msg";
+    try {
+      const res = await fetch("/api/artstation/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (artData.some((e) => e.id && e.id === data.entry.id)) {
+        statusEl.textContent = "That artwork is already in your data.";
+        statusEl.className = "status-msg error";
+        return;
+      }
+      closeArtstationOverlay();
+      openEdit(-1, data.entry);
+    } catch (e) {
+      statusEl.textContent = `Error: ${e.message}`;
+      statusEl.className = "status-msg error";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Fetch & Add";
+    }
+  });
+
+  document.getElementById("addJsonItem").addEventListener("click", () => {
+    document.getElementById("addMenu").hidden = true;
+    openJsonOverlay();
+  });
+
+  document.getElementById("jsonOverlayBg").addEventListener("click", closeJsonOverlay);
+  document.getElementById("jsonCloseBtn").addEventListener("click", closeJsonOverlay);
+  document.getElementById("jsonFileBtn").addEventListener("click", () => document.getElementById("jsonFileInput").click());
+  document.getElementById("jsonFileInput").addEventListener("change", () => {
+    const f = document.getElementById("jsonFileInput").files[0];
+    document.getElementById("jsonFileName").textContent = f ? f.name : "No file selected";
+  });
+
+  document.getElementById("jsonApplyBtn").addEventListener("click", async () => {
+    const urlInput = document.getElementById("jsonUrlInput");
+    const fileInput = document.getElementById("jsonFileInput");
+    const statusEl = document.getElementById("jsonStatus");
+    const btn = document.getElementById("jsonApplyBtn");
+    const url = urlInput.value.trim();
+    const file = fileInput.files[0];
+    if (!url && !file) {
+      statusEl.textContent = "Paste a URL or choose a projects.json file.";
+      statusEl.className = "status-msg error";
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "Updating...";
+    statusEl.textContent = "Parsing projects...";
+    statusEl.className = "status-msg";
+    try {
+      const body = { currentArtData: artData };
+      if (file) {
+        let parsed;
+        try {
+          parsed = JSON.parse(await file.text());
+        } catch {
+          throw new Error("The selected file is not valid JSON.");
+        }
+        body.projects = parsed;
+      } else {
+        body.url = url;
+      }
+      statusEl.textContent = "Merging and fetching full images from each source link (this can take a minute)...";
+      const res = await fetch("/api/artstation/projects-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      artData = data.artData || [];
+      dirty = true;
+      document.getElementById("saveBtn").disabled = false;
+      renderAll();
+      closeJsonOverlay();
+      status.textContent = `Merged ${data.count} projects (${data.added} added, ${data.updated} updated).` +
+        (typeof data.imagesFetched === "number"
+          ? ` Fetched full images for ${data.imagesFetched} posts${data.imageErrors ? ` (${data.imageErrors} failed)` : ""}.`
+          : "") +
+        " Review and save.";
+      status.className = "status-msg success";
+    } catch (e) {
+      statusEl.textContent = `Error: ${e.message}`;
+      statusEl.className = "status-msg error";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Update Data";
+    }
+  });
 
   document.getElementById("overlayBg").addEventListener("click", closeEdit);
   document.getElementById("editCloseBtn").addEventListener("click", closeEdit);

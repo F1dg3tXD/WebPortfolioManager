@@ -709,3 +709,5 @@ manage/node_modules/wsl-utils/package.json
 manage/node_modules/wsl-utils/readme.md
 
 *.zip
+
+manage/node_modules/

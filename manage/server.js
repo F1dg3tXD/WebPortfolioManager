@@ -3,6 +3,7 @@ import { exec } from "child_process";
 import { homedir } from "os";
 import { join, dirname } from "path";
 import express from "express";
+import puppeteer from "puppeteer-core";
 
 function findPublicDir() {
   const candidates = [
@@ -494,6 +495,543 @@ app.post("/api/commit", async (req, res) => {
     const result = await response.json();
     currentSha = result.content.sha;
     res.json({ sha: result.content.sha });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ArtStation import ──
+
+const AS_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+  Accept: "application/json,text/plain,*/*",
+  "Accept-Language": "en-US,en;q=0.9",
+  Referer: "https://www.artstation.com/",
+  Origin: "https://www.artstation.com",
+  "Cache-Control": "no-cache",
+};
+
+function artstationHashFromUrl(url) {
+  const m = String(url || "").match(/artstation\.com\/(?:projects|artwork)\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : "";
+}
+
+function cleanHtml(html) {
+  if (!html) return "";
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#x2F;/gi, "/")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function toLargeUrl(url) {
+  return String(url || "").replace("/original/", "/large/");
+}
+
+// ── ArtStation fetch layer ──
+// ArtStation sits behind Cloudflare, which challenges plain HTTP requests
+// (403) unless a real browser runs its JS challenge. So fetches try a plain
+// request first, then fall back to a shared headless Chromium browser that
+// solves the challenge automatically. The browser executable is resolved
+// from AS_BROWSER, config.artstationBrowser, or well-known installed paths.
+
+let asBrowser = null;
+let asBrowserLaunch = null;
+let asPage = null;
+let asFetchQueue = Promise.resolve();
+
+function detectBrowserExecutable() {
+  if (process.env.AS_BROWSER) return process.env.AS_BROWSER;
+  if (config.artstationBrowser) return config.artstationBrowser;
+  const platform = process.platform;
+  const candidates =
+    platform === "win32"
+      ? [
+          (process.env["ProgramFiles(x86)"] || "") + "\\Microsoft\\Edge\\Application\\msedge.exe",
+          (process.env.ProgramFiles || "") + "\\Microsoft\\Edge\\Application\\msedge.exe",
+          (process.env.ProgramFiles || "") + "\\Google\\Chrome\\Application\\chrome.exe",
+          (process.env["ProgramFiles(x86)"] || "") + "\\Google\\Chrome\\Application\\chrome.exe",
+        ]
+      : platform === "darwin"
+      ? [
+          "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Chromium.app/Contents/MacOS/Chromium",
+          "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        ]
+      : [
+          "/usr/bin/google-chrome",
+          "/usr/bin/google-chrome-stable",
+          "/usr/bin/chromium",
+          "/usr/bin/chromium-browser",
+          "/snap/bin/chromium",
+        ];
+  for (const path of candidates) {
+    if (path && existsSync(path)) return path;
+  }
+  return "";
+}
+
+async function getAsBrowser() {
+  if (asBrowser) return asBrowser;
+  if (asBrowserLaunch) return asBrowserLaunch;
+  const executablePath = detectBrowserExecutable();
+  if (!executablePath) {
+    throw asHttpError(
+      502,
+      "No Chrome/Edge/Chromium browser found for ArtStation access. Set AS_BROWSER (or config.artstationBrowser) to a browser executable path."
+    );
+  }
+  asBrowserLaunch = puppeteer
+    .launch({
+      executablePath,
+      headless: true,
+      args: ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"],
+    })
+    .then((browser) => {
+      asBrowser = browser;
+      asBrowserLaunch = null;
+      return browser;
+    })
+    .catch((err) => {
+      asBrowserLaunch = null;
+      throw err;
+    });
+  return asBrowserLaunch;
+}
+
+function resetAsBrowser() {
+  const old = asBrowser;
+  asBrowser = null;
+  asBrowserLaunch = null;
+  asPage = null;
+  if (old) old.close().catch(() => {});
+}
+
+async function getAsPage() {
+  if (asPage) return asPage;
+  const browser = await getAsBrowser();
+  asPage = await browser.newPage();
+  asPage.setUserAgent(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+  );
+  asPage.setDefaultTimeout(60000);
+  return asPage;
+}
+
+function asHttpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+async function asBrowserFetchText(url) {
+  let attempts = 0;
+  for (;;) {
+    try {
+      const page = await getAsPage();
+      const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      if (resp.status() === 200 || resp.status() === 304) {
+        return await page.evaluate(() => document.body.innerText);
+      }
+      throw asHttpError(resp.status(), `ArtStation responded with HTTP ${resp.status()}.`);
+    } catch (err) {
+      const transient = err && typeof err === "object" && !err.status;
+      if (transient && attempts++ < 1) {
+        await new Promise((r) => setTimeout(r, 2000));
+        resetAsBrowser();
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+async function asBrowserFetchJson(url) {
+  const text = await asBrowserFetchText(url);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw asHttpError(502, "ArtStation returned data that could not be parsed as JSON.");
+  }
+}
+
+function asFetchJson(url) {
+  const run = asFetchQueue.then(async () => {
+    try {
+      const response = await fetch(url, { headers: AS_HEADERS });
+      if (response.ok) return await response.json();
+    } catch {}
+    return asBrowserFetchJson(url);
+  });
+  asFetchQueue = run.then(() => {}, () => {});
+  return run;
+}
+
+async function fetchJsonUrl(url) {
+  try {
+    const response = await fetch(url);
+    if (response.ok) return JSON.parse(await response.text());
+  } catch {}
+  try {
+    return await asBrowserFetchJson(url);
+  } catch (err) {
+    if (err instanceof SyntaxError) throw asHttpError(400, "The URL did not return valid JSON.");
+    throw err;
+  }
+}
+
+// Fetches a projects list URL, following ArtStation's pagination when the
+// list reports a total_count larger than what a single page returns.
+async function fetchProjectsList(url) {
+  const all = [];
+  let page = 1;
+  for (;;) {
+    const pageUrl = page === 1 ? url : `${url}${url.includes("?") ? "&" : "?"}page=${page}`;
+    const json = await fetchJsonUrl(pageUrl);
+    const list = Array.isArray(json) ? json : json.data || json.projects || json.artData;
+    if (!Array.isArray(list)) {
+      throw asHttpError(400, "The URL did not return a projects list.");
+    }
+    all.push(...list);
+    const total = Array.isArray(json) ? undefined : json.total_count;
+    if (typeof total === "number" && all.length < total && list.length) {
+      page++;
+      continue;
+    }
+    break;
+  }
+  return all;
+}
+
+// Normalizes a detail JSON response into the fields the manager stores.
+function detailToFullEntry(detail, hash) {
+  const images = [];
+  for (const asset of detail.assets || []) {
+    if (!asset || typeof asset !== "object") continue;
+    if (asset.type === "video" || asset.video_player) continue;
+    if (asset.image_url) images.push(toLargeUrl(asset.image_url));
+  }
+
+  let embed = "";
+  for (const asset of detail.assets || []) {
+    if (asset && typeof asset === "object" && asset.video_player) {
+      embed = asset.video_player;
+      break;
+    }
+  }
+
+  const tags = [];
+  for (const t of detail.tags || []) {
+    if (typeof t === "string") tags.push(t);
+    else if (t && typeof t === "object" && t.name) tags.push(t.name);
+  }
+
+  return {
+    images,
+    embed,
+    tags,
+    sourceLink: detail.permalink || (hash ? `https://www.artstation.com/artwork/${hash}` : ""),
+    description: cleanHtml(detail.description) || undefined,
+    title: detail.title || undefined,
+  };
+}
+
+app.post("/api/artstation/import", async (req, res) => {
+  try {
+    const hash = artstationHashFromUrl(req.body && req.body.url);
+    if (!hash) {
+      return res.status(400).json({ error: "That doesn't look like an ArtStation artwork link." });
+    }
+
+    const api = `https://www.artstation.com/projects/${hash}.json`;
+    let detail;
+    try {
+      detail = await asFetchJson(api);
+    } catch (err) {
+      if (err.status === 404) {
+        return res.status(404).json({ error: "ArtStation could not find that artwork." });
+      }
+      if (err.status === 403 || err.status === 401) {
+        return res.status(502).json({
+          error: "ArtStation blocked the request (403) even for the built-in browser. Check that it can open artstation.com, then retry.",
+        });
+      }
+      return res.status(502).json({ error: err.message });
+    }
+
+    const full = detailToFullEntry(detail, hash);
+
+    const lowerTags = full.tags.map((t) => t.toLowerCase());
+    const entry = {
+      type: lowerTags.includes("professional") ? "professional" : "personal",
+      is3D: lowerTags.includes("3d"),
+      isAvatar: lowerTags.includes("avatar"),
+      title: full.title || "",
+      description: full.description || "",
+      sourceLink: full.sourceLink,
+      images: full.images,
+      embed: full.embed,
+      thumbnail: "",
+      thumbnailCrop: null,
+      tags: full.tags,
+      id: hash,
+    };
+
+    res.json({ entry });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Update from JSON (ArtStation projects list) ──
+// Mirrors DataParser's build_json() merge: matches projects to existing
+// entries by id, backfills existing ones with what the raw project list
+// provides (cover thumbnail, description, link), and creates entries for
+// new projects. Afterwards each entry that still lacks full images is
+// fetched from its ArtStation source link (through the headless browser)
+// so the artwork's full image list and tags come in automatically.
+
+function extractCoverUrl(project) {
+  const cover = (project && project.cover) || {};
+  return cover.thumb_url || cover.small_square_url || cover.micro_square_image_url || "";
+}
+
+function extractTags(project) {
+  const raw = (project && (project.tags || project.tag_list)) || [];
+  const names = [];
+  for (const t of raw) {
+    if (typeof t === "string") names.push(t);
+    else if (t && typeof t === "object" && t.name) names.push(t.name);
+  }
+  return names;
+}
+
+function hasFullImages(images) {
+  return (images || []).some((img) => /\/large\/|\/original\//.test(String(img)));
+}
+
+function convertProjectFromList(project) {
+  const thumbnailUrl = extractCoverUrl(project);
+  const rawTags = extractTags(project);
+  return {
+    type: "personal",
+    is3D: false,
+    title: (project && project.title) || "",
+    description: cleanHtml(project && project.description),
+    sourceLink: (project && (project.permalink || project.url)) || "",
+    images: thumbnailUrl ? [thumbnailUrl] : [],
+    embed: "",
+    thumbnail: thumbnailUrl,
+    thumbnailCrop: null,
+    tags: rawTags,
+    isAvatar: rawTags.some((t) => String(t).toLowerCase() === "avatar"),
+  };
+}
+
+function buildIdLookup(entries) {
+  const lookup = {};
+  for (const entry of entries || []) {
+    if (entry.id) {
+      lookup[entry.id] = entry;
+      continue;
+    }
+    const m = String(entry.sourceLink || "").match(/\/artwork\/([^?#]+)/);
+    if (m) lookup[m[1]] = entry;
+  }
+  return lookup;
+}
+
+function expandEntries(entries) {
+  const expanded = [];
+  for (const entry of entries) {
+    if (entry.type !== "personal" && entry.type !== "professional") entry.type = "personal";
+    if (entry.isAvatar) {
+      entry.type = "personal";
+      expanded.push(entry);
+      continue;
+    }
+    const tags = (entry.tags || []).map((t) => String(t).toLowerCase());
+    const orgTypes = [...new Set(tags.filter((t) => t === "personal" || t === "professional"))];
+    const orgDims = [...new Set(tags.map((t) => (t === "3d" ? true : t === "2d" ? false : null)).filter((d) => d !== null))];
+    if (!orgTypes.length && !orgDims.length) {
+      expanded.push(entry);
+      continue;
+    }
+    const typeValues = orgTypes.length ? orgTypes : [entry.type || "personal"];
+    const dimValues = orgDims.length ? orgDims : [!!entry.is3D];
+    for (const t of typeValues) {
+      for (const d of dimValues) {
+        expanded.push({ ...entry, type: t, is3D: d });
+      }
+    }
+  }
+  return expanded;
+}
+
+function mergeProjects(cacheEntries, projects) {
+  const existingById = buildIdLookup(cacheEntries);
+  const merged = [];
+  const seenIds = new Set();
+  for (const entry of cacheEntries) {
+    if (entry.id && !seenIds.has(entry.id)) {
+      merged.push(entry);
+      seenIds.add(entry.id);
+    }
+  }
+
+  let added = 0;
+  let updated = 0;
+  for (const project of projects) {
+    if (!project || typeof project !== "object") continue;
+    const hashId = project.hash_id || project.hash || project.id;
+    if (!hashId) continue;
+    const existing = existingById[hashId];
+    if (existing) {
+      let changed = false;
+      if (!existing.id) {
+        existing.id = hashId;
+        changed = true;
+      }
+      if (!(existing.images || []).length) {
+        const coverUrl = extractCoverUrl(project);
+        if (coverUrl) {
+          existing.images = [coverUrl];
+          existing.thumbnail = coverUrl;
+          changed = true;
+        }
+      }
+      if (!existing.description) {
+        const listDesc = cleanHtml(project.description);
+        if (listDesc) {
+          existing.description = listDesc;
+          changed = true;
+        }
+      }
+      if (!existing.sourceLink) {
+        existing.sourceLink = project.permalink || project.url || "";
+        if (existing.sourceLink) changed = true;
+      }
+      if (changed) updated++;
+    } else {
+      const entry = convertProjectFromList(project);
+      entry.id = hashId;
+      merged.push(entry);
+      added++;
+    }
+  }
+
+  return { artData: expandEntries(merged), added, updated };
+}
+
+// Fetches each artwork's detail JSON from its source link to fill in the
+// full image list, embed, and tags. Projects are fetched once per unique
+// id (entries may be expanded into several rows) and failures are skipped.
+async function backfillArtstationImages(entries) {
+  const byId = new Map();
+  for (const entry of entries) {
+    if (!entry || !entry.id || /^\d+$/.test(String(entry.id))) continue;
+    if (hasFullImages(entry.images)) continue;
+    const id = String(entry.id);
+    if (!byId.has(id)) byId.set(id, []);
+    byId.get(id).push(entry);
+  }
+
+  const fetchGroup = async (id, group) => {
+    const api = `https://www.artstation.com/projects/${id}.json`;
+    const detail = await asFetchJson(api);
+    const full = detailToFullEntry(detail, id);
+    for (const entry of group) {
+      entry.images = full.images;
+      if (full.embed && !entry.embed) entry.embed = full.embed;
+      if (full.tags.length && !(entry.tags || []).length) entry.tags = full.tags;
+      if (full.description && !entry.description) entry.description = full.description;
+      if (full.title && !entry.title) entry.title = full.title;
+      if (full.sourceLink && !entry.sourceLink) entry.sourceLink = full.sourceLink;
+    }
+  };
+
+  let imagesFetched = 0;
+  let imageErrors = 0;
+  const pending = [];
+  for (const [id, group] of byId) {
+    try {
+      await fetchGroup(id, group);
+      imagesFetched++;
+    } catch (err) {
+      pending.push({ id, group });
+    }
+  }
+  for (const { id, group } of pending) {
+    await new Promise((r) => setTimeout(r, 2500));
+    try {
+      await fetchGroup(id, group);
+      imagesFetched++;
+    } catch (err) {
+      console.warn(`ArtStation backfill failed for ${id}: ${err.message}`);
+      imageErrors++;
+    }
+  }
+  return { imagesFetched, imageErrors };
+}
+
+app.post("/api/artstation/projects-import", async (req, res) => {
+  try {
+    const { url, projects, currentArtData } = req.body || {};
+    const cacheEntries = Array.isArray(currentArtData) ? currentArtData : [];
+
+    let parsedProjects = projects;
+    if (parsedProjects == null && url) {
+      try {
+        parsedProjects = await fetchProjectsList(String(url));
+      } catch (err) {
+        const status = err.status || 500;
+        if (status === 403) {
+          return res.status(403).json({
+            error: "That URL blocked the request (403) from the server and the built-in browser. Try uploading the file instead.",
+          });
+        }
+        return res.status(status).json({
+          error: status === 400 ? err.message : `Could not fetch the URL: ${err.message}`,
+        });
+      }
+    }
+
+    if (parsedProjects == null) {
+      return res.status(400).json({ error: "Provide a projects.json URL or upload a file." });
+    }
+
+    const projectsArray = Array.isArray(parsedProjects)
+      ? parsedProjects
+      : parsedProjects.data || parsedProjects.projects || parsedProjects.artData || [];
+    if (!Array.isArray(projectsArray)) {
+      return res.status(400).json({ error: "The JSON does not contain a projects list." });
+    }
+
+    const result = mergeProjects(cacheEntries, projectsArray);
+    const backfill = await backfillArtstationImages(result.artData);
+    res.json({
+      artData: result.artData,
+      count: projectsArray.length,
+      added: result.added,
+      updated: result.updated,
+      imagesFetched: backfill.imagesFetched,
+      imageErrors: backfill.imageErrors,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

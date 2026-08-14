@@ -605,6 +605,62 @@ body {
   transform: scale(0.92);
 }
 
+.add-dropdown {
+  position: relative;
+}
+
+.add-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10000;
+  min-width: 170px;
+  background: linear-gradient(145deg, #1a1a1a, #111);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.add-menu[hidden] {
+  display: none;
+}
+
+.add-menu-item {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.add-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.json-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.json-file-name {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 .settings-panel {
   position: relative;
   background: linear-gradient(145deg, #1a1a1a, #111);
