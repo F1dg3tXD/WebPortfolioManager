@@ -835,6 +835,14 @@ let styleSha = null;
 let styleDirty = false;
 let styleElements = null;
 
+// Style undo history. Each entry reverts a single variable change:
+// { block, prop, before, after, hadDecl, created }. Drags and color-wheel
+// interactions are coalesced into ONE entry via a transaction, so undoing a
+// color change goes straight back to the color before the drag started.
+let styleUndoStack = [];
+let styleUndoActive = false;
+let styleUndoPending = null;
+
 function switchTab(name) {
   document.querySelectorAll(".app-tab").forEach((t) => {
     t.classList.toggle("app-tab--active", t.dataset.tab === name);
@@ -1040,6 +1048,7 @@ async function loadStyle() {
   }
   const data = await res.json();
   styleSha = data.sha;
+  clearStyleUndo();
   styleBlocks = parseCSS(data.content || "");
   try {
     await loadStyleElements();
@@ -1496,7 +1505,7 @@ function findMatchBlock(data) {
 
 function createRuleFor(data) {
   const sel = data.primary || "body";
-  const block = { type: "rule", prelude: sel, inner: "\n", raw: "", edited: true, decls: [] };
+  const block = { type: "rule", prelude: sel, inner: "\n", raw: "", edited: true, decls: [], __justCreated: true };
   styleBlocks.push(block);
   styleDirty = true;
   updateStyleSave();
@@ -1529,12 +1538,107 @@ function readValue(data, cssProp) {
 
 function applyVisualProp(data, cssProp, cssVal) {
   const block = ruleToEdit(data);
+  const created = block.__justCreated === true;
+  if (created) block.__justCreated = false;
+  const before = readPropState(block, cssProp);
+  if (styleUndoActive) {
+    if (!styleUndoPending) {
+      styleUndoPending = { block, prop: cssProp, before: before.value, hadDecl: before.hadDecl, created };
+    }
+  } else {
+    pushStyleUndo({ block, prop: cssProp, before: before.value, after: cssVal, hadDecl: before.hadDecl, created });
+  }
   setBlockProp(block, cssProp, cssVal);
   styleDirty = true;
   updateStyleSave();
   injectEditorCss(getPreviewDoc());
   renderStyleList();
   refreshVisualControls(data);
+}
+
+function readPropState(block, prop) {
+  const d = declsOf(block).find((i) => i.kind === "decl" && i.prop === prop);
+  return { value: d ? d.value : "", hadDecl: !!d };
+}
+
+// A drag / color-wheel interaction is a single undo step: begin before the
+// first change, end when the interaction finishes. Only the final value is
+// recorded, so intermediate colors never pollute the history.
+function beginStyleUndo() {
+  if (!styleUndoActive) {
+    styleUndoActive = true;
+    styleUndoPending = null;
+  }
+}
+
+function endStyleUndo() {
+  styleUndoActive = false;
+  if (styleUndoPending) {
+    const p = styleUndoPending;
+    const after = readPropState(p.block, p.prop).value;
+    styleUndoPending = null;
+    pushStyleUndo({ block: p.block, prop: p.prop, before: p.before, after, hadDecl: p.hadDecl, created: p.created });
+  }
+}
+
+function pushStyleUndo(entry) {
+  if (entry.before === entry.after) return;
+  styleUndoStack.push(entry);
+  if (styleUndoStack.length > 200) styleUndoStack.shift();
+  updateStyleUndoUI();
+}
+
+function clearStyleUndo() {
+  styleUndoStack.length = 0;
+  styleUndoActive = false;
+  styleUndoPending = null;
+  updateStyleUndoUI();
+}
+
+function removePropDecl(block, prop) {
+  const decls = declsOf(block);
+  const i = decls.findIndex((d) => d.kind === "decl" && d.prop === prop);
+  if (i >= 0) decls.splice(i, 1);
+  block.inner = serializeDecls(decls);
+}
+
+function undoStyle() {
+  endStyleUndo();
+  while (styleUndoStack.length) {
+    const entry = styleUndoStack.pop();
+    const block = entry.block;
+    const idx = styleBlocks.indexOf(block);
+    if (idx === -1) continue;
+    if (entry.created) {
+      removePropDecl(block, entry.prop);
+      if (!declsOf(block).some((i) => i.kind === "decl")) styleBlocks.splice(idx, 1);
+    } else if (!entry.hadDecl) {
+      removePropDecl(block, entry.prop);
+    } else {
+      setBlockProp(block, entry.prop, entry.before);
+    }
+    block.edited = true;
+    styleDirty = true;
+    updateStyleSave();
+    injectEditorCss(getPreviewDoc());
+    renderStyleList();
+    refreshVisualControls(inspected);
+    updateStyleUndoUI();
+    return true;
+  }
+  updateStyleUndoUI();
+  return false;
+}
+
+function updateStyleUndoUI() {
+  const btn = document.getElementById("styleUndoBtn");
+  if (!btn) return;
+  const n = styleUndoStack.length;
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Undo (${n})` : "Undo";
+  btn.title = n
+    ? `Undo last change (${n} step${n === 1 ? "" : "s"} in history) — Ctrl/Cmd+Z`
+    : "No style changes to undo — Ctrl/Cmd+Z";
 }
 
 function refreshVisualControls(data) {
@@ -1615,15 +1719,19 @@ function makeSliderControl(data, def) {
   track.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     track.setPointerCapture(e.pointerId);
+    beginStyleUndo();
     commit(fromEvent(e));
     const mv = (ev) => commit(fromEvent(ev));
     const up = (ev) => {
       track.releasePointerCapture(ev.pointerId);
       track.removeEventListener("pointermove", mv);
       track.removeEventListener("pointerup", up);
+      track.removeEventListener("pointercancel", up);
+      endStyleUndo();
     };
     track.addEventListener("pointermove", mv);
     track.addEventListener("pointerup", up);
+    track.addEventListener("pointercancel", up);
   });
   track.addEventListener("keydown", (e) => {
     const dir = e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -1 : 0;
@@ -1658,6 +1766,7 @@ function makeColorControl(data, def) {
   }
   root.querySelector(".vc-swatch").addEventListener("click", (e) => {
     e.stopPropagation();
+    beginStyleUndo();
     openColorPopover(root.querySelector(".vc-swatch"), readValue(data, def.css) || "transparent", (css) => {
       applyVisualProp(data, def.css, css);
     });
@@ -1740,15 +1849,19 @@ function makeShadowControl(data, def) {
     tr.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       tr.setPointerCapture(e.pointerId);
+      beginStyleUndo();
       setOf(i)(fromEvent(e)); setPct(); emit();
       const mv = (ev) => { setOf(i)(fromEvent(ev)); setPct(); emit(); };
       const up = (ev) => {
         tr.releasePointerCapture(ev.pointerId);
         tr.removeEventListener("pointermove", mv);
         tr.removeEventListener("pointerup", up);
+        tr.removeEventListener("pointercancel", up);
+        endStyleUndo();
       };
       tr.addEventListener("pointermove", mv);
       tr.addEventListener("pointerup", up);
+      tr.addEventListener("pointercancel", up);
     });
   });
   onInput.addEventListener("change", () => {
@@ -1758,6 +1871,7 @@ function makeShadowControl(data, def) {
   });
   root.querySelector(".vc-swatch--sm").addEventListener("click", (e) => {
     e.stopPropagation();
+    beginStyleUndo();
     openColorPopover(root.querySelector(".vc-swatch--sm"), state.color, (css) => {
       state.color = css;
       colorFill.style.background = css;
@@ -2089,6 +2203,7 @@ function closeColorPopover() {
   const pop = document.getElementById("colorPopover");
   if (pop) pop.hidden = true;
   colorPopoverCb = null;
+  endStyleUndo();
 }
 
 function initColorPopover() {
@@ -2168,6 +2283,15 @@ function initStyleTab() {
     t.addEventListener("click", () => switchTab(t.dataset.tab));
   });
   document.getElementById("styleSaveBtn").addEventListener("click", saveStyle);
+  document.getElementById("styleUndoBtn").addEventListener("click", undoStyle);
+  document.addEventListener("keydown", (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.shiftKey) return;
+    const t = e.target;
+    if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.tagName === "SELECT")) return;
+    if (!document.getElementById("panel-style").classList.contains("tab-panel--active")) return;
+    e.preventDefault();
+    undoStyle();
+  });
   document.getElementById("styleFilter").addEventListener("input", renderStyleList);
   document.getElementById("styleValuesBtn").addEventListener("click", toggleStyleValues);
   document.getElementById("refreshElementsBtn").addEventListener("click", async () => {
