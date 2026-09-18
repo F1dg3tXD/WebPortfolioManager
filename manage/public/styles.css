@@ -1578,6 +1578,26 @@ body {
   box-shadow: var(--shadow-soft);
   flex-shrink: 0;
 }
+.bg-target {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.bg-target-btn {
+  border: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.bg-target-btn.active {
+  background: rgba(9, 144, 247, 0.18);
+  color: #c9f4ff;
+  border: none;
+}
 .bg-value-row {
   display: flex;
   gap: 10px;

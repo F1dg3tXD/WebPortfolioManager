@@ -2440,11 +2440,21 @@ function frame(ts) {
 }
 
 async function load() {
+  const bgPath = document.body.dataset.background || "background.json";
   try {
-    const res = await fetch(new URL("background.json", import.meta.url));
+    const res = await fetch(new URL(bgPath, import.meta.url));
     config = await res.json();
   } catch (e) {
-    config = { color: "#000000", layers: [] };
+    if (bgPath !== "background.json") {
+      try {
+        const res = await fetch(new URL("background.json", import.meta.url));
+        config = await res.json();
+      } catch (e2) {
+        config = { color: "#000000", layers: [] };
+      }
+    } else {
+      config = { color: "#000000", layers: [] };
+    }
   }
   const layers = config.layers || [];
   images = new Array(layers.length);
@@ -2476,6 +2486,7 @@ const ICON_UP = '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M12 19
 const ICON_DOWN = '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 let bgState = null;
+let bgTarget = "main";
 let bgImages = {};
 let bgPlaying = false;
 let bgTime = 0;
@@ -3060,7 +3071,7 @@ async function saveBackground() {
   status.className = "status-msg";
   try {
     const files = [
-      { path: "background/background.json", content: JSON.stringify(buildBgConfig(), null, 2), encoding: "utf8" },
+      { path: `background/${bgTarget === "game-art" ? "game-art.json" : "background.json"}`, content: JSON.stringify(buildBgConfig(), null, 2), encoding: "utf8" },
       { path: "background/index.html", content: BG_INDEX_HTML, encoding: "utf8" },
       { path: "background/style.css", content: BG_STYLE_CSS, encoding: "utf8" },
       { path: "background/main.js", content: BG_RUNTIME_JS, encoding: "utf8" },
@@ -3214,10 +3225,18 @@ async function initBackgroundTab() {
     }
   });
   document.getElementById("bgSaveBtn").addEventListener("click", saveBackground);
+  document.getElementById("bgTargetMain").addEventListener("click", () => switchBgTarget("main"));
+  document.getElementById("bgTargetGameArt").addEventListener("click", () => switchBgTarget("game-art"));
   initBgPlayhead();
 
+  await loadBgConfig();
+}
+
+async function loadBgConfig() {
+  bgSetPlaying(false);
+  bgTime = 0;
   try {
-    const res = await fetch("/api/background/config");
+    const res = await fetch(`/api/background/config?target=${bgTarget}`);
     const data = await res.json();
     bgState = data && data.config && data.config.layers ? normalizeBgConfig(data.config) : defaultBgState();
   } catch (e) {
@@ -3226,6 +3245,7 @@ async function initBackgroundTab() {
   }
   await loadBgImages();
   bgSelectedLayerId = bgState.layers.length ? bgState.layers[0].id : null;
+  bgSelectedKey = null;
   document.getElementById("bgDuration").value = bgState.duration;
   document.getElementById("bgFps").value = bgState.fps;
   document.getElementById("bgLoopBtn").classList.toggle("active", bgState.loop);
@@ -3237,6 +3257,16 @@ async function initBackgroundTab() {
   updateBgCanvasEmpty();
   requestAnimationFrame(() => drawBg());
   if (bgState.layers.length) bgSetPlaying(true);
+  bgDirty = false;
+  updateBgSave();
+}
+
+function switchBgTarget(target) {
+  if (bgTarget === target) return;
+  if (bgDirty && !window.confirm("Discard unsaved background changes?")) return;
+  bgTarget = target;
+  document.querySelectorAll(".bg-target-btn").forEach((b) => b.classList.toggle("active", b.dataset.target === target));
+  loadBgConfig();
 }
 
 async function init() {

@@ -329,13 +329,17 @@ app.get("/api/background-image", async (req, res) => {
 
 // Editor state for the background timeline. The generated background.json is
 // what the site's background/main.js loads at runtime; the editor reads it
-// back (via raw, no rate limit) so the client's animation is restored.
+// back (via raw, no rate limit) so the client's animation is restored. The
+// Game Art page uses its own config (background/game-art.json), chosen with
+// ?target=game-art.
 app.get("/api/background/config", async (req, res) => {
   try {
-    const api = `https://raw.githubusercontent.com/${config.repo}/main/background/background.json`;
+    const target = String(req.query.target || "main");
+    const file = target === "game-art" ? "background/game-art.json" : "background/background.json";
+    const api = `https://raw.githubusercontent.com/${config.repo}/main/${file}`;
     let response = await fetch(api);
     if (response.status === 404) {
-      response = await fetch(`https://raw.githubusercontent.com/${config.repo}/master/background/background.json`);
+      response = await fetch(`https://raw.githubusercontent.com/${config.repo}/master/${file}`);
     }
     if (response.ok) {
       return res.json({ config: JSON.parse(await response.text()) });
