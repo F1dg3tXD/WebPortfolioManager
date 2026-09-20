@@ -1184,33 +1184,55 @@ function renderStyleList() {
 }
 
 function updateStyleSave() {
-  document.getElementById("styleSaveBtn").disabled = !styleDirty;
+  document.getElementById("styleSaveBtn").disabled = !(styleDirty || pendingImageUploads.length);
 }
 
 async function saveStyle() {
   const btn = document.getElementById("styleSaveBtn");
   const status = document.getElementById("styleStatus");
   btn.disabled = true;
-  status.textContent = "Pushing style.css to GitHub...";
+  const pushing = [];
+  if (styleDirty) pushing.push("style.css");
+  if (pendingImageUploads.length) pushing.push(`${pendingImageUploads.length} image${pendingImageUploads.length === 1 ? "" : "s"}`);
+  status.textContent = `Pushing ${pushing.join(" + ")} to GitHub...`;
   status.className = "status-msg";
   try {
-    const content = generateCSS(styleBlocks);
-    const res = await fetch("/api/style", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, sha: styleSha }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || `HTTP ${res.status}`);
+    if (styleDirty) {
+      const content = generateCSS(styleBlocks);
+      const res = await fetch("/api/style", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, sha: styleSha }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const result = await res.json();
+      styleSha = result.sha;
+      styleDirty = false;
+      styleBlocks.forEach((b) => { b.edited = false; });
+      renderStyleList();
     }
-    const result = await res.json();
-    styleSha = result.sha;
-    styleDirty = false;
-    styleBlocks.forEach((b) => { b.edited = false; });
-    renderStyleList();
-    status.textContent = `style.css saved! SHA: ${result.sha.slice(0, 7)}`;
-    status.className = "status-msg success";
+    if (pendingImageUploads.length) {
+      const res = await fetch("/api/upload", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files: pendingImageUploads, message: "Replace images from manage page" }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const result = await res.json();
+      pendingImageUploads.length = 0;
+      status.textContent = `Images replaced! (${result.files.length})`;
+      status.className = "status-msg success";
+    } else {
+      status.textContent = `style.css saved! SHA: ${styleSha ? styleSha.slice(0, 7) : "?"}`;
+      status.className = "status-msg success";
+    }
+    updateStyleSave();
   } catch (e) {
     status.textContent = `Error: ${e.message}`;
     status.className = "status-msg error";
@@ -1225,6 +1247,7 @@ let pastedElements = [];
 let selectedPreviewEl = null;
 let inspectedElRef = null;
 let showStyleValues = false;
+let pendingImageUploads = [];
 const visualControls = [];
 let colorPopoverCb = null;
 let colorWheelH = 0;
@@ -1339,6 +1362,7 @@ const ICONS = {
   alignCenter: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 5h16M4 10h16M7 15h10M4 20h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   alignRight: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 5h16M4 10h16M10 15h10M7 20h13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   alignJustify: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 5h16M4 10h16M4 15h16M4 20h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  img: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="10" r="2" fill="currentColor"/><path d="M4 18l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 function elementData(el) {
@@ -1351,7 +1375,18 @@ function elementData(el) {
         ? el.className.trim().split(/\s+/).filter(Boolean)
         : [];
   const primary = id ? `#${id}` : classes[0] ? `.${classes[0]}` : tag;
-  return { tag, id, classes, primary };
+  const attrs = {};
+  if (tag === "img") {
+    for (const a of ["src", "srcset", "alt"]) {
+      const v = el.getAttribute(a);
+      if (v != null) attrs[a] = v;
+    }
+    if (!attrs.src) {
+      const cs = el.currentSrc;
+      if (cs) attrs.src = cs;
+    }
+  }
+  return { tag, id, classes, primary, attrs };
 }
 
 function selectorPath(el) {
@@ -1676,6 +1711,11 @@ const VISUAL_GROUPS = [
       { key: "textShadow", css: "text-shadow", kind: "shadow", label: "Text shadow", icon: "tshadow" },
     ],
   },
+  {
+    name: "Image", id: "propImage", props: [
+      { key: "transform", css: "transform", kind: "imageTransform", label: "Scale & position", icon: "img", tags: ["img"] },
+    ],
+  },
 ];
 
 function sliderNumber(raw, def) {
@@ -1899,7 +1939,263 @@ function makeVisualControl(data, def) {
   if (def.kind === "color") return makeColorControl(data, def);
   if (def.kind === "align") return makeAlignControl(data, def);
   if (def.kind === "shadow") return makeShadowControl(data, def);
+  if (def.kind === "imageTransform") return makeImageTransformControl(data, def);
   return makeSliderControl(data, def);
+}
+
+// ── Image controls (Style editor) ──
+// Scale & position sliders write a single `transform` value so the image rule
+// stays one declaration. `none`, "translate(...) scale(...)" strings and
+// computed "matrix(...)" values are all understood.
+
+function parseTransformCss(css) {
+  const state = { x: 0, y: 0, scale: 100, rot: 0, hasRot: false };
+  if (!css || css === "none") return state;
+  const trm = /translate3d\(([^)]+)\)|translate\(([^)]+)\)/.exec(css);
+  if (trm) {
+    const parts = (trm[1] || trm[2]).split(",").map((s) => parseFloat(s));
+    state.x = isFinite(parts[0]) ? parts[0] : 0;
+    state.y = isFinite(parts[1]) ? parts[1] : 0;
+  }
+  const sm = /scale(?:X|Y|3d)?\(([^)]+)\)/.exec(css);
+  if (sm) {
+    const sx = parseFloat(sm[1].split(",")[0]);
+    if (isFinite(sx)) state.scale = sx * 100;
+  }
+  const rm = /rotate(?:Z)?\(([^)]+)\)/.exec(css);
+  if (rm) {
+    const r = parseFloat(rm[1]);
+    if (isFinite(r)) { state.rot = r; state.hasRot = true; }
+  }
+  const m = /matrix\(([^)]+)\)/.exec(css);
+  if (m) {
+    const p = m[1].split(",").map((s) => parseFloat(s));
+    if (p.length >= 6) {
+      state.x = p[4] || 0;
+      state.y = p[5] || 0;
+      const sx = Math.hypot(p[0], p[1]);
+      if (sx > 0.001) state.scale = sx * 100;
+    }
+  }
+  return state;
+}
+
+function makeImageTransformControl(data, def) {
+  const ROWS = [
+    { name: "Scale", min: 10, max: 300, step: 1, fmt: (v) => Math.round(v) + "%", get: (s) => s.scale, set: (s, v) => { s.scale = v; } },
+    { name: "X", min: -400, max: 400, step: 1, fmt: (v) => Math.round(v) + "px", get: (s) => s.x, set: (s, v) => { s.x = v; } },
+    { name: "Y", min: -400, max: 400, step: 1, fmt: (v) => Math.round(v) + "px", get: (s) => s.y, set: (s, v) => { s.y = v; } },
+  ];
+  const root = document.createElement("div");
+  root.className = "vc vc-image-transform";
+  root.innerHTML =
+    `<div class="vc-head"><span class="vc-icon">${ICONS[def.icon] || ""}</span><span class="vc-label">${def.label}</span><span class="vc-value"></span></div>` +
+    `<div class="vc-shadow-body">` +
+    ROWS.map((r, i) => `<div class="vc-shadow-row"><span class="vc-shadow-name">${r.name}</span><div class="vc-track vc-track--sm" data-ax="${i}"><div class="vc-fill"></div><div class="vc-knob"></div></div><span class="vc-shadow-val" data-val="${i}"></span></div>`).join("") +
+    `</div>`;
+  const valEl = root.querySelector(".vc-value");
+  const state = parseTransformCss(readValue(data, def.css));
+  let current = { ...state };
+  function rend() {
+    ROWS.forEach((r, i) => {
+      const tr = root.querySelector(`.vc-track--sm[data-ax="${i}"]`);
+      const v = Math.max(r.min, Math.min(r.max, r.get(state)));
+      const p = ((v - r.min) / (r.max - r.min)) * 100;
+      tr.querySelector(".vc-knob").style.left = p + "%";
+      tr.querySelector(".vc-fill").style.width = p + "%";
+      const vl = root.querySelector(`.vc-shadow-val[data-val="${i}"]`);
+      vl.textContent = r.fmt(v);
+    });
+    valEl.textContent = `${Math.round(state.scale)}% · x${state.x} · y${state.y}`;
+  }
+  function emit() {
+    let t = `translate(${Math.round(state.x)}px, ${Math.round(state.y)}px)`;
+    if (state.hasRot) t += ` rotate(${state.rot}deg)`;
+    t += ` scale(${(state.scale / 100).toFixed(4)})`;
+    applyVisualProp(data, def.css, t);
+    rend();
+  }
+  root.querySelectorAll(".vc-track--sm").forEach((tr) => {
+    const i = +tr.dataset.ax;
+    const r = ROWS[i];
+    function fromEvent(e) {
+      const rect = tr.getBoundingClientRect();
+      const v = r.min + ((e.clientX - rect.left) / Math.max(rect.width, 1)) * (r.max - r.min);
+      return r.min + Math.round((Math.max(r.min, Math.min(r.max, v)) - r.min) / r.step) * r.step;
+    }
+    tr.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      current = { ...state };
+      tr.setPointerCapture(e.pointerId);
+      beginStyleUndo();
+      r.set(state, fromEvent(e));
+      emit();
+      const mv = (ev) => { r.set(state, fromEvent(ev)); emit(); };
+      const up = (ev) => {
+        tr.releasePointerCapture(ev.pointerId);
+        tr.removeEventListener("pointermove", mv);
+        tr.removeEventListener("pointerup", up);
+        tr.removeEventListener("pointercancel", up);
+        endStyleUndo();
+      };
+      tr.addEventListener("pointermove", mv);
+      tr.addEventListener("pointerup", up);
+      tr.addEventListener("pointercancel", up);
+    });
+  });
+  rend();
+  return {
+    el: root,
+    refresh: () => {
+      const next = parseTransformCss(readValue(data, def.css));
+      state.x = next.x; state.y = next.y; state.scale = next.scale; state.rot = next.rot; state.hasRot = next.hasRot;
+      rend();
+    },
+  };
+}
+
+// Map a preview <img> src back to its repo-relative path. Null when the image
+// is not a repo asset (external URL, data:/blob:, /api/...).
+function repoPathFromSrc(src) {
+  if (!src || typeof src !== "string") return null;
+  if (/^(data:|blob:)/.test(src)) return null;
+  if (/^https?:\/\//i.test(src)) return null;
+  let p = src;
+  if (p.startsWith("/repo/")) {
+    p = p.slice("/repo/".length);
+  } else if (p.startsWith("/api/")) {
+    return null;
+  } else if (!p.startsWith("/")) {
+    return null;
+  } else {
+    p = p.slice(1);
+  }
+  p = p.split("?")[0].split("#")[0];
+  if (!p || p.split("/").some((s) => s === "..")) return null;
+  return p;
+}
+
+// Gallery art lives under art-like paths; those are managed by the Art Data
+// tab, so surface them as not replaceable here rather than overwriting them.
+function isArtImagePath(path) {
+  return /(^|\/)(art|projects|details)(\/|$)/.test(path) || /(\/large\/|\/thumbs\/|\/full\/)/.test(path);
+}
+
+// Reads a picked file for upload. When the file's format differs from the
+// target path's extension, it is re-encoded via canvas so the repo file keeps
+// a matching extension (otherwise GitHub would serve the wrong MIME type).
+function fileToUploadBytes(file, targetExt) {
+  return new Promise((resolve, reject) => {
+    const direct = targetExt === "jpg" ? "jpeg" : targetExt;
+    const fileExt = (file.type || "").toLowerCase().replace("image/", "");
+    const sameType = fileExt === targetExt || (fileExt === "jpg" && targetExt === "jpeg");
+    if (sameType || !["png", "jpeg", "webp"].includes(direct)) {
+      const fr = new FileReader();
+      fr.onload = () => resolve({ dataURL: fr.result, preview: fr.result, converted: false });
+      fr.onerror = () => reject(new Error("Could not read the selected file"));
+      fr.readAsDataURL(file);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext("2d").drawImage(img, 0, 0);
+        const mime = direct === "png" ? "image/png" : direct === "webp" ? "image/webp" : "image/jpeg";
+        canvas.toBlob((blob) => {
+          URL.revokeObjectURL(url);
+          if (!blob) return reject(new Error("Could not convert the image"));
+          const fr = new FileReader();
+          fr.onload = () => resolve({ dataURL: fr.result, preview: canvas.toDataURL(), converted: true });
+          fr.onerror = () => reject(new Error("Could not read the converted image"));
+          fr.readAsDataURL(blob);
+        }, mime, 0.92);
+      } catch (e) {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not convert the image"));
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not read the selected file")); };
+    img.src = url;
+  });
+}
+
+function safeText(s) {
+  return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// "Replace image" card shown under the scale & position sliders for any <img>
+// element. Staging the file enables the normal Save to GitHub button, which
+// pushes it to the repo in place so existing references keep working.
+function renderImageReplace(data, container) {
+  const src = data.attrs && data.attrs.src;
+  const repoPath = repoPathFromSrc(src);
+  const art = repoPath ? isArtImagePath(repoPath) : false;
+  const el = document.createElement("div");
+  el.className = "img-replace";
+  let inner;
+  if (src) {
+    const note = art
+      ? "Art gallery image — manage it in the Art Data tab."
+      : repoPath
+        ? "Upload a file to overwrite this image in the site repo."
+        : "This image is external — replace via its source URL.";
+    inner =
+      `<div class="img-replace-thumb"><img src="${safeText(src)}" alt="" /></div>` +
+      `<div class="img-replace-meta">` +
+      `<div class="img-replace-path">${repoPath ? "/" + safeText(repoPath) : safeText(src)}</div>` +
+      `<div class="img-replace-note">${note}</div>` +
+      `</div>` +
+      `<div class="img-replace-btn-wrap"><button type="button" class="secondary-btn img-replace-btn">Replace…</button></div>`;
+  } else {
+    inner = `<div class="img-replace-meta"><div class="img-replace-note">No image source.</div></div>`;
+  }
+  el.innerHTML = `<div class="img-replace-head">${inner}</div><input type="file" class="img-replace-file" accept="image/*" hidden />`;
+  container.appendChild(el);
+
+  const btn = el.querySelector(".img-replace-btn");
+  const fileInput = el.querySelector(".img-replace-file");
+  if (!fileInput) return;
+  if (art || !repoPath) {
+    if (btn) {
+      btn.disabled = true;
+      btn.title = art ? "Gallery images are managed in the Art Data tab" : "This image is not stored in the site repo";
+    }
+    return;
+  }
+
+  btn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = "";
+    if (!file) return;
+    const status = document.getElementById("styleStatus");
+    const pristine = inspectedElRef ? inspectedElRef.getAttribute("src") : null;
+    btn.disabled = true;
+    try {
+      const targetExt = (repoPath.split(".").pop() || "").toLowerCase();
+      const { dataURL, preview, converted } = await fileToUploadBytes(file, targetExt);
+      pendingImageUploads = pendingImageUploads.filter((f) => f.path !== repoPath);
+      pendingImageUploads.push({ path: repoPath, content: dataURL.split(",")[1], encoding: "base64" });
+      if (inspectedElRef) inspectedElRef.src = preview;
+      const thumb = el.querySelector(".img-replace-thumb img");
+      if (thumb) thumb.src = preview;
+      updateStyleSave();
+      status.textContent = converted
+        ? `Image staged to replace ${repoPath} (re-encoded to ${targetExt.toUpperCase()}). Press Save to GitHub.`
+        : `Image staged to replace ${repoPath}. Press Save to GitHub.`;
+      status.className = "status-msg success";
+    } catch (e) {
+      if (inspectedElRef && pristine) inspectedElRef.src = pristine;
+      status.textContent = `Error: ${e.message}`;
+      status.className = "status-msg error";
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 function buildVisualControls(data) {
@@ -1909,10 +2205,14 @@ function buildVisualControls(data) {
   visualControls.length = 0;
   for (const g of VISUAL_GROUPS) {
     for (const def of g.props) {
+      if (def.tags && def.tags.indexOf(data.tag) === -1) continue;
       const ctl = makeVisualControl(data, def);
       visualControls.push(ctl);
       document.getElementById(g.id).appendChild(ctl.el);
     }
+  }
+  if (data.tag === "img") {
+    renderImageReplace(data, document.getElementById("propImage"));
   }
   refreshVisualControls(data);
 }
@@ -1973,6 +2273,8 @@ function renderInspector(data) {
 
   populateAttachSelect("");
   document.getElementById("newRuleSel").value = data.primary;
+  const imageTitle = document.getElementById("inspectorImageTitle");
+  if (imageTitle) imageTitle.style.display = data.tag === "img" ? "" : "none";
   buildVisualControls(data);
 }
 

@@ -400,6 +400,56 @@ app.put("/api/background/save", async (req, res) => {
   }
 });
 
+// Uploads one or more site images into the repo, overwriting each target path
+// so existing references keep working. This is used by the Style editor to
+// replace site images that are not art data (pfp, name logo, about image,
+// etc.). Entries are { path, content (base64), encoding: "utf8" | "base64" }.
+// The current blob SHA is fetched per file so updates replace, not conflict.
+app.put("/api/upload", async (req, res) => {
+  try {
+    const { files, message } = req.body || {};
+    if (!Array.isArray(files) || !files.length) {
+      return res.status(400).json({ error: "files array is required" });
+    }
+    const ALLOWED_IMG = ["png", "jpg", "jpeg", "webp", "gif", "svg", "ico", "bmp", "avif"];
+    const results = [];
+    for (const f of files) {
+      let filePath = String(f.path || "").replace(/^\/+/, "");
+      if (!filePath) return res.status(400).json({ error: "path is required" });
+      if (filePath.split("/").some((s) => s === "..")) {
+        return res.status(400).json({ error: `invalid path: ${filePath}` });
+      }
+      if (!ALLOWED_IMG.includes(extOf(filePath))) {
+        return res.status(400).json({ error: `path must be an image file: ${filePath}` });
+      }
+      const enc = f.encoding === "utf8" ? "utf8" : "base64";
+      const content = enc === "utf8"
+        ? Buffer.from(String(f.content || ""), "utf-8").toString("base64")
+        : String(f.content || "");
+      if (!content) return res.status(400).json({ error: `content is required for ${filePath}` });
+
+      const infoApi = `https://api.github.com/repos/${config.repo}/contents/${filePath}`;
+      const infoRes = await fetch(infoApi, { headers: getAuthHeaders() });
+      const sha = infoRes.ok ? (await infoRes.json()).sha : undefined;
+
+      const putRes = await fetch(infoApi, {
+        method: "PUT",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ message: message || "Replace image from manage page", content, sha }),
+      });
+      if (!putRes.ok) {
+        const err = await putRes.json();
+        return res.status(putRes.status).json({ error: `${filePath}: ${err.message}` });
+      }
+      const result = await putRes.json();
+      results.push({ path: filePath, sha: result.content.sha });
+    }
+    res.json({ files: results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Site preview proxy ──
 // Serves the repo's actual pages/assets same-origin so the preview iframe is
 // inspectable. Absolute / paths in HTML and JS are rewritten to /repo/... so
