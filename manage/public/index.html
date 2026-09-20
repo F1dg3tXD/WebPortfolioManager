@@ -103,6 +103,15 @@
               <div id="inspectorContent" hidden>
                 <div class="inspector-summary" id="inspectorSummary"></div>
 
+                <div class="inspector-scope">
+                  <label class="inspector-note" for="editScope">Changes apply to</label>
+                  <select id="editScope" class="text-input edit-scope" title="Where new style changes are written">
+                    <option value="page">This page only</option>
+                    <option value="all">All pages</option>
+                  </select>
+                  <div class="inspector-note inspector-scope-note">Page-only changes add a scoped rule so this page can look different from the others.</div>
+                </div>
+
                 <div class="inspector-section-title">Colors</div>
                 <div class="prop-group" id="propColors"></div>
 
@@ -134,7 +143,16 @@
             </div>
 
             <div class="inspector-body" id="inspectorElements">
-              <input id="styleFilter" type="text" class="text-input style-filter" placeholder="Filter elements..." autocomplete="off" />
+              <div class="rules-filter-row">
+                <input id="styleFilter" type="text" class="text-input style-filter" placeholder="Filter elements..." autocomplete="off" />
+                <select id="stylePageFilter" class="text-input rules-page-filter" title="Filter rules by page">
+                  <option value="">All pages</option>
+                  <option value="home">Home</option>
+                  <option value="about">About</option>
+                  <option value="personal">Portfolio</option>
+                  <option value="game-art">Game Art</option>
+                </select>
+              </div>
               <div class="style-list" id="styleList"></div>
             </div>
           </div>
@@ -222,6 +240,15 @@
   <div id="colorPopover" class="color-popover" hidden>
     <canvas id="colorWheel" class="color-wheel" width="140" height="140"></canvas>
     <div class="color-bright" id="colorBright"></div>
+    <div class="color-alpha-row">
+      <span class="color-alpha-label">Transparency</span>
+      <div class="color-alpha" id="colorAlpha">
+        <div class="color-alpha-bg"></div>
+        <div class="color-alpha-fill"></div>
+        <div class="color-alpha-knob"></div>
+      </div>
+      <span class="color-alpha-val" id="colorAlphaVal">100%</span>
+    </div>
     <div class="color-popover-footer">
       <span id="colorHexLabel" class="color-hex" hidden></span>
       <button id="colorClearBtn" class="secondary-btn">Transparent</button>

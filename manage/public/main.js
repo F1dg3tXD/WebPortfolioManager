@@ -990,6 +990,55 @@ function ruleMatchesElement(block, element) {
   return tags.has(element);
 }
 
+// ── Per-page style scoping ──
+// Styling can be unique per page. A rule whose selector begins with
+// body[data-page="game-art"] ... only applies inside the Game Art page, so
+// the same class (e.g. .root-wrap) can look different on different pages.
+const PAGES = [
+  { key: "home", path: "home/index.html", label: "Home" },
+  { key: "about", path: "about/index.html", label: "About" },
+  { key: "personal", path: "personal/index.html", label: "Personal" },
+  { key: "game-art", path: "game-art/index.html", label: "Game Art" },
+];
+
+let editScopePref = "page"; // "page" = this page only | "all" = all pages
+
+function currentPageKey() {
+  const sel = document.getElementById("previewPage");
+  const path = (sel && sel.value) || "home/index.html";
+  const page = PAGES.find((p) => p.path === path);
+  return page ? page.key : "";
+}
+
+function currentPageLabel() {
+  const page = PAGES.find((p) => p.key === currentPageKey());
+  return page ? page.label : "";
+}
+
+function pageScopeOfRule(block) {
+  if (!block || block.type !== "rule") return "";
+  const m = /\[data-page=(["'])([a-z0-9-]+)\1\]/i.exec(block.prelude || "");
+  return m ? m[2] : "";
+}
+
+function isScopedRule(block) {
+  return !!pageScopeOfRule(block);
+}
+
+function pageSelector(pageKey, sel) {
+  return `body[data-page="${pageKey}"] ${sel}`;
+}
+
+function scopedSelector(sel) {
+  const key = currentPageKey();
+  return key ? pageSelector(key, sel) : sel;
+}
+
+function editScopeNow() {
+  const el = document.getElementById("editScope");
+  return el ? el.value : "page";
+}
+
 // ── CSS declarations model ──
 // Rules are kept as prelude + inner text. For visual editing we additionally
 // parse `inner` into declaration items so a control can read/modify a single
@@ -1077,6 +1126,14 @@ function createRuleItem(b) {
   label.textContent = b.prelude;
   label.title = b.prelude;
   item.appendChild(label);
+  const scopedPage = pageScopeOfRule(b);
+  if (scopedPage) {
+    const badge = document.createElement("span");
+    badge.className = "style-rule-page";
+    const pg = PAGES.find((p) => p.key === scopedPage);
+    badge.textContent = pg ? `${pg.label} only` : scopedPage;
+    item.appendChild(badge);
+  }
   const ta = document.createElement("textarea");
   ta.className = "text-input style-rule-input";
   ta.spellcheck = false;
@@ -1139,12 +1196,15 @@ function renderStyleList() {
   const list = document.getElementById("styleList");
   list.innerHTML = "";
   const filter = document.getElementById("styleFilter").value.trim().toLowerCase();
+  const pageFilter = document.getElementById("stylePageFilter") ? document.getElementById("stylePageFilter").value : "";
   const elements = getStyleElements();
+
+  const ruleVisible = (b) => !pageFilter || !isScopedRule(b) || pageScopeOfRule(b) === pageFilter;
 
   const matchedSet = new Set();
   const matched = [];
   for (const element of elements) {
-    const rules = styleBlocks.filter((b) => ruleMatchesElement(b, element));
+    const rules = styleBlocks.filter((b) => ruleMatchesElement(b, element) && ruleVisible(b));
     rules.forEach((b) => matchedSet.add(b));
     matched.push({ element, rules });
   }
@@ -1153,7 +1213,7 @@ function renderStyleList() {
     if (b.type !== "rule") return false;
     return b.prelude.replace(/\s+/g, "").split(",").every((s) => s === "*" || s === "*::before" || s === "*::after");
   };
-  const others = styleBlocks.filter((b) => !matchedSet.has(b) && !isUniversalRule(b) && (b.type === "atrule" || b.type === "rule"));
+  const others = styleBlocks.filter((b) => !matchedSet.has(b) && !isUniversalRule(b) && (b.type === "atrule" || b.type === "rule") && ruleVisible(b));
 
   const filtered = matched.filter((m) => !filter || m.element.toLowerCase().includes(filter));
 
@@ -1253,6 +1313,7 @@ let colorPopoverCb = null;
 let colorWheelH = 0;
 let colorWheelS = 0;
 let colorWheelV = 1;
+let colorWheelA = 1;
 
 function getPreviewDoc() {
   const frame = document.getElementById("sitePreview");
@@ -1440,6 +1501,8 @@ function wirePreviewInspector() {
   const frame = document.getElementById("sitePreview");
   if (!frame || !frame.contentDocument) return;
   const doc = frame.contentDocument;
+  const pageKey = currentPageKey();
+  if (pageKey && doc.body) doc.body.setAttribute("data-page", pageKey);
   ensurePreviewStyles(doc);
   injectEditorCss(doc);
   if (pastedElements.length) renderPastedIntoPreview();
@@ -1492,6 +1555,8 @@ function switchInspectorTab(name) {
 
 function blockMatchesElementData(block, data) {
   if (block.type !== "rule") return false;
+  const scope = pageScopeOfRule(block);
+  if (scope && scope !== currentPageKey()) return false;
   const { classes, ids, tags } = selectorTokens(block.prelude);
   if (data.id && ids.has(`#${data.id}`)) return true;
   if (tags.has(data.tag)) return true;
@@ -1538,17 +1603,32 @@ function findMatchBlock(data) {
   return best;
 }
 
-function createRuleFor(data) {
+function createRuleFor(data, pageKey) {
   const sel = data.primary || "body";
-  const block = { type: "rule", prelude: sel, inner: "\n", raw: "", edited: true, decls: [], __justCreated: true };
+  const prelude = pageKey ? pageSelector(pageKey, sel) : sel;
+  const block = { type: "rule", prelude, inner: "\n", raw: "", edited: true, decls: [], __justCreated: true };
   styleBlocks.push(block);
   styleDirty = true;
   updateStyleSave();
   return block;
 }
 
+// Returns the rule a visual edit should write to, honoring the inspector's
+// "This page only" / "All pages" scope. Page-scoped edits target (or create)
+// a body[data-page="..."] override; "All pages" edits target the shared rule.
 function ruleToEdit(data) {
-  return findMatchBlock(data) || createRuleFor(data);
+  const scope = editScopeNow();
+  const key = currentPageKey();
+  const candidates = styleBlocks.filter((b) => b.type === "rule" && blockMatchesElementData(b, data));
+  if (scope === "all") {
+    const global = candidates.find((b) => !isScopedRule(b));
+    if (global) return global;
+    return createRuleFor(data, null);
+  }
+  const paged = candidates.find((b) => isScopedRule(b) && pageScopeOfRule(b) === key);
+  if (paged) return paged;
+  if (!key) return candidates[0] || createRuleFor(data, null);
+  return createRuleFor(data, key);
 }
 
 // The current value for a property: exact value written in a matching rule if
@@ -2245,6 +2325,15 @@ function renderInspector(data) {
   path.textContent = data.path || "";
   summary.appendChild(path);
 
+  const scopeSel = document.getElementById("editScope");
+  if (scopeSel) scopeSel.value = editScopePref;
+  const scopeNote = document.querySelector(".inspector-scope-note");
+  if (scopeNote) {
+    scopeNote.textContent = editScopePref === "page"
+      ? `Changes below add a scoped rule for ${currentPageLabel()} only, so other pages keep their own look.`
+      : "Changes below edit the shared rule, so they apply on every page.";
+  }
+
   const matches = styleBlocks
     .filter((b) => blockMatchesElementData(b, data))
     .sort((a, b) => getMatchPriority(a, data) - getMatchPriority(b, data));
@@ -2260,7 +2349,10 @@ function renderInspector(data) {
   for (const b of matches) {
     const chip = document.createElement("button");
     chip.className = "style-rule-prelude apply-chip";
-    chip.textContent = b.prelude;
+    const scopedPage = pageScopeOfRule(b);
+    chip.textContent = scopedPage
+      ? `${b.prelude}  ·  ${PAGES.find((p) => p.key === scopedPage) ? PAGES.find((p) => p.key === scopedPage).label : scopedPage} only`
+      : b.prelude;
     chip.title = "Open in Rules & Code";
     chip.addEventListener("click", () => {
       switchInspectorTab("elements");
@@ -2283,6 +2375,14 @@ function attachToRule(data) {
   if (!sel) return;
   const block = styleBlocks.find((b) => b.type === "rule" && b.prelude.trim() === sel);
   if (!block) return;
+  const blockPage = pageScopeOfRule(block);
+  if (blockPage && blockPage !== currentPageKey()) {
+    const pg = PAGES.find((p) => p.key === blockPage);
+    const status = document.getElementById("styleStatus");
+    status.textContent = `That rule only applies on ${pg ? pg.label : blockPage}. Switch to that page first (or use "This page only" to make a new one).`;
+    status.className = "status-msg error";
+    return;
+  }
   const tokens = selectorTokens(block.prelude);
   const target = data.primary;
   if (target.startsWith("#") ? tokens.ids.has(target) : target.startsWith(".") ? tokens.classes.has(target) : tokens.tags.has(target)) {
@@ -2301,7 +2401,8 @@ function attachToRule(data) {
 }
 
 function addNewRule(data) {
-  const sel = document.getElementById("newRuleSel").value.trim() || data.primary;
+  const raw = document.getElementById("newRuleSel").value.trim() || data.primary;
+  const sel = editScopeNow() === "all" ? raw : scopedSelector(raw);
   const exists = styleBlocks.some((b) => b.type === "rule" && b.prelude.trim() === sel);
   if (exists) {
     const status = document.getElementById("styleStatus");
@@ -2466,34 +2567,52 @@ function renderColorWheel() {
     const { h, s } = { h: colorWheelH, s: colorWheelS };
     bright.style.background = `linear-gradient(to right, #000, hsl(${h}, ${Math.round(s * 100)}%, 50%))`;
   }
+  renderAlphaTrack();
 }
 
 function emitWheelColor() {
-  const hex = toHex(wheelRgb());
+  const { r, g, b } = wheelRgb();
+  const a = Math.max(0, Math.min(1, colorWheelA));
   const label = document.getElementById("colorHexLabel");
-  if (label) label.textContent = hex;
-  if (colorPopoverCb) colorPopoverCb(hex);
+  if (label) {
+    label.textContent = toHex({ r, g, b }) + (a < 1 ? `  ${Math.round(a * 100)}% alpha` : "");
+  }
+  if (colorPopoverCb) colorPopoverCb(cssColorStr({ r, g, b, a }));
+}
+
+function renderAlphaTrack() {
+  const track = document.getElementById("colorAlpha");
+  if (!track) return;
+  const a = Math.max(0, Math.min(1, colorWheelA));
+  const { r, g, b } = wheelRgb();
+  track.querySelector(".color-alpha-fill").style.width = a * 100 + "%";
+  track.querySelector(".color-alpha-knob").style.left = a * 100 + "%";
+  track.querySelector(".color-alpha-bg").style.background =
+    `linear-gradient(to right, rgba(${r}, ${g}, ${b}, 0), rgba(${r}, ${g}, ${b}, 1))`;
+  const val = document.getElementById("colorAlphaVal");
+  if (val) val.textContent = Math.round(a * 100) + "%";
 }
 
 function openColorPopover(anchor, currentCss, onChange) {
   const pop = document.getElementById("colorPopover");
   if (!pop) return;
   const parsed = parseCssColor(currentCss);
-  colorWheelH = 0; colorWheelS = 0; colorWheelV = 1;
+  colorWheelH = 0; colorWheelS = 0; colorWheelV = 1; colorWheelA = 1;
   if (parsed && parsed.a > 0) {
     const { h, s, l } = rgbToHsl(parsed.r, parsed.g, parsed.b);
     colorWheelH = h;
     colorWheelS = s;
     colorWheelV = Math.min(1, l / 0.5);
   }
+  if (parsed) colorWheelA = Math.max(0, Math.min(1, parsed.a));
   renderColorWheel();
   const r = anchor.getBoundingClientRect();
-  const pw = 196;
+  const pw = 216;
   let left = r.left - pw / 2 + r.width / 2;
   let top = r.bottom + 8;
   if (left < 8) left = 8;
   if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
-  if (top + 260 > window.innerHeight) top = r.top - 268;
+  if (top + 316 > window.innerHeight) top = r.top - 324;
   pop.style.left = left + "px";
   pop.style.top = top + "px";
   pop.hidden = false;
@@ -2511,6 +2630,7 @@ function closeColorPopover() {
 function initColorPopover() {
   const cv = document.getElementById("colorWheel");
   const bright = document.getElementById("colorBright");
+  const alpha = document.getElementById("colorAlpha");
   const pop = document.getElementById("colorPopover");
   const hex = document.getElementById("colorHexLabel");
   const clearBtn = document.getElementById("colorClearBtn");
@@ -2556,6 +2676,26 @@ function initColorPopover() {
     };
     bright.addEventListener("pointermove", mv);
     bright.addEventListener("pointerup", up);
+  });
+
+  function alphaFromEvent(e) {
+    const r = alpha.getBoundingClientRect();
+    colorWheelA = Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(r.width, 1)));
+  }
+  alpha.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    alpha.setPointerCapture(e.pointerId);
+    alphaFromEvent(e);
+    renderAlphaTrack();
+    emitWheelColor();
+    const mv = (ev) => { alphaFromEvent(ev); renderAlphaTrack(); emitWheelColor(); };
+    const up = (ev) => {
+      alpha.releasePointerCapture(ev.pointerId);
+      alpha.removeEventListener("pointermove", mv);
+      alpha.removeEventListener("pointerup", up);
+    };
+    alpha.addEventListener("pointermove", mv);
+    alpha.addEventListener("pointerup", up);
   });
 
   clearBtn.addEventListener("click", () => {
@@ -2615,7 +2755,21 @@ function initStyleTab() {
   preview.addEventListener("load", wirePreviewInspector);
   document.getElementById("previewPage").addEventListener("change", (e) => {
     loadPreviewPage(e.target.value);
+    renderStyleList();
   });
+  const editScope = document.getElementById("editScope");
+  if (editScope) {
+    editScope.value = editScopePref;
+    editScope.addEventListener("change", () => {
+      editScopePref = editScope.value;
+      if (inspected) {
+        renderInspector(inspected);
+        injectEditorCss(getPreviewDoc());
+      }
+    });
+  }
+  const pageFilter = document.getElementById("stylePageFilter");
+  if (pageFilter) pageFilter.addEventListener("change", renderStyleList);
 
   document.querySelectorAll(".inspector-tab").forEach((t) => {
     t.addEventListener("click", () => switchInspectorTab(t.dataset.itab));
