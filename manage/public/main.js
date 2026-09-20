@@ -1003,6 +1003,35 @@ const PAGES = [
 
 let editScopePref = "page"; // "page" = this page only | "all" = all pages
 
+// Element states you can style separately. The "state" selector at the top of
+// the inspector picks which one the visual controls edit, e.g. a :hover rule
+// that only applies while the pointer is over the element.
+const ELEMENT_STATES = [
+  { key: "normal", label: "Normal", pseudo: "" },
+  { key: "hover", label: "Hover", pseudo: ":hover" },
+  { key: "active", label: "Active", pseudo: ":active" },
+  { key: "focus", label: "Focus", pseudo: ":focus" },
+];
+
+let editStatePref = "normal";
+
+function statePseudoOf(key) {
+  const s = ELEMENT_STATES.find((x) => x.key === key);
+  return s ? s.pseudo : "";
+}
+
+function editStateNow() {
+  const el = document.getElementById("editState");
+  return el && el.value ? el.value : "normal";
+}
+
+// Pseudo-state a rule is scoped to ("", ":hover", ":active", ":focus").
+function stateSuffixOf(block) {
+  if (!block || block.type !== "rule") return "";
+  const m = /(:hover|:active|:focus|:visited)(?=[\s,]|$)/.exec((block.prelude || "").trim());
+  return m ? m[1] : "";
+}
+
 function currentPageKey() {
   const sel = document.getElementById("previewPage");
   const path = (sel && sel.value) || "home/index.html";
@@ -1099,12 +1128,16 @@ async function loadStyle() {
   styleSha = data.sha;
   clearStyleUndo();
   styleBlocks = parseCSS(data.content || "");
+  const beforeClean = styleBlocks.length;
+  styleBlocks = styleBlocks.filter((b) => !/(\.si-(?:hover|selected))(?![\w-])/.test(b.prelude || ""));
+  if (styleBlocks.length !== beforeClean) styleDirty = true;
   try {
     await loadStyleElements();
   } catch (e) {
     console.warn("Could not scan site elements:", e);
   }
   renderStyleList();
+  updateStyleSave();
 }
 
 async function loadStyleElements() {
@@ -1121,19 +1154,28 @@ function getStyleElements() {
 function createRuleItem(b) {
   const item = document.createElement("div");
   item.className = "style-rule";
+  const head = document.createElement("div");
+  head.className = "style-rule-head";
   const label = document.createElement("div");
   label.className = "style-rule-prelude";
   label.textContent = b.prelude;
   label.title = b.prelude;
-  item.appendChild(label);
+  head.appendChild(label);
   const scopedPage = pageScopeOfRule(b);
   if (scopedPage) {
     const badge = document.createElement("span");
     badge.className = "style-rule-page";
     const pg = PAGES.find((p) => p.key === scopedPage);
     badge.textContent = pg ? `${pg.label} only` : scopedPage;
-    item.appendChild(badge);
+    head.appendChild(badge);
   }
+  const del = document.createElement("button");
+  del.className = "style-rule-del";
+  del.textContent = "Delete";
+  del.title = "Remove this rule from style.css (restoreable via Undo)";
+  del.addEventListener("click", () => removeStyleBlock(b, null));
+  head.appendChild(del);
+  item.appendChild(head);
   const ta = document.createElement("textarea");
   ta.className = "text-input style-rule-input";
   ta.spellcheck = false;
@@ -1431,9 +1473,9 @@ function elementData(el) {
   const id = el.id || "";
   const classes =
     el.classList && typeof el.classList.contains === "function"
-      ? Array.from(el.classList)
+      ? Array.from(el.classList).filter((c) => !/^si-/.test(c))
       : el.className && typeof el.className === "string"
-        ? el.className.trim().split(/\s+/).filter(Boolean)
+        ? el.className.trim().split(/\s+/).filter(Boolean).filter((c) => !/^si-/.test(c))
         : [];
   const primary = id ? `#${id}` : classes[0] ? `.${classes[0]}` : tag;
   const attrs = {};
@@ -1463,7 +1505,7 @@ function selectorPath(el) {
     const id = node.id ? `#${node.id}` : "";
     const cls =
       node.classList && node.classList.length
-        ? "." + Array.from(node.classList).join(".")
+        ? "." + Array.from(node.classList).filter((c) => !/^si-/.test(c)).join(".")
         : "";
     parts.unshift(t + id + cls);
     node = node.parentElement;
@@ -1603,8 +1645,8 @@ function findMatchBlock(data) {
   return best;
 }
 
-function createRuleFor(data, pageKey) {
-  const sel = data.primary || "body";
+function createRuleFor(data, pageKey, pseudo) {
+  const sel = (data.primary || "body") + (pseudo || "");
   const prelude = pageKey ? pageSelector(pageKey, sel) : sel;
   const block = { type: "rule", prelude, inner: "\n", raw: "", edited: true, decls: [], __justCreated: true };
   styleBlocks.push(block);
@@ -1613,28 +1655,47 @@ function createRuleFor(data, pageKey) {
   return block;
 }
 
+// The best rule that matches `data` with the requested scope AND element
+// state. Returns null when there is nothing to read from, in which case the
+// caller falls back to the computed style / best-match rule.
+function findEditableBlock(data, scope, pseudo) {
+  const key = currentPageKey();
+  const cands = styleBlocks.filter((b) => b.type === "rule" && blockMatchesElementData(b, data));
+  const wantScope = (b) =>
+    scope === "all" ? !isScopedRule(b) : isScopedRule(b) && pageScopeOfRule(b) === key;
+  const samePseudo = (b) => stateSuffixOf(b) === pseudo;
+  let hit = cands.find((b) => wantScope(b) && samePseudo(b));
+  if (hit) return hit;
+  if (!pseudo) return null;
+  return cands.find((b) => b.type === "rule" && samePseudo(b)) || null;
+}
+
 // Returns the rule a visual edit should write to, honoring the inspector's
-// "This page only" / "All pages" scope. Page-scoped edits target (or create)
-// a body[data-page="..."] override; "All pages" edits target the shared rule.
+// "This page only" / "All pages" scope and the selected element state.
+// Page-scoped edits target (or create) a body[data-page="..."] override;
+// "All pages" edits target the shared rule. State edits append the pseudo
+// class (e.g. .root-wrap:hover) so hover/active/focus get their own values.
 function ruleToEdit(data) {
   const scope = editScopeNow();
   const key = currentPageKey();
+  const pseudo = statePseudoOf(editStatePref);
   const candidates = styleBlocks.filter((b) => b.type === "rule" && blockMatchesElementData(b, data));
+  const wantPseudo = (b) => stateSuffixOf(b) === pseudo;
   if (scope === "all") {
-    const global = candidates.find((b) => !isScopedRule(b));
+    const global = candidates.find((b) => !isScopedRule(b) && wantPseudo(b));
     if (global) return global;
-    return createRuleFor(data, null);
+    return createRuleFor(data, null, pseudo);
   }
-  const paged = candidates.find((b) => isScopedRule(b) && pageScopeOfRule(b) === key);
+  const paged = candidates.find((b) => isScopedRule(b) && pageScopeOfRule(b) === key && wantPseudo(b));
   if (paged) return paged;
-  if (!key) return candidates[0] || createRuleFor(data, null);
-  return createRuleFor(data, key);
+  if (!key) return candidates.find(wantPseudo) || createRuleFor(data, null, pseudo);
+  return createRuleFor(data, key, pseudo);
 }
 
 // The current value for a property: exact value written in a matching rule if
 // present, otherwise the live computed value of the inspected element.
 function readValue(data, cssProp) {
-  const block = findMatchBlock(data);
+  const block = findEditableBlock(data, editScopeNow(), statePseudoOf(editStatePref)) || findMatchBlock(data);
   if (block) {
     const v = getBlockProp(block, cssProp);
     if (v != null && v !== "") return v;
@@ -1649,6 +1710,22 @@ function readValue(data, cssProp) {
     }
   }
   return null;
+}
+
+// Removes a rule block entirely. Restoreable via Undo, so an accidental
+// deletion is never lost before saving.
+function removeStyleBlock(b, activeData) {
+  const idx = styleBlocks.indexOf(b);
+  if (idx === -1) return;
+  pushStyleUndo({ type: "rule-removed", index: idx, block: b });
+  styleBlocks.splice(idx, 1);
+  if (b.decls) b.decls = [];
+  styleDirty = true;
+  updateStyleSave();
+  injectEditorCss(getPreviewDoc());
+  renderStyleList();
+  if (activeData) renderInspector(activeData);
+  else if (inspected) refreshVisualControls(inspected);
 }
 
 function applyVisualProp(data, cssProp, cssVal) {
@@ -1669,6 +1746,7 @@ function applyVisualProp(data, cssProp, cssVal) {
   injectEditorCss(getPreviewDoc());
   renderStyleList();
   refreshVisualControls(data);
+  renderInspectorMatches(data);
 }
 
 function readPropState(block, prop) {
@@ -1697,7 +1775,7 @@ function endStyleUndo() {
 }
 
 function pushStyleUndo(entry) {
-  if (entry.before === entry.after) return;
+  if (entry.type !== "rule-removed" && entry.before === entry.after) return;
   styleUndoStack.push(entry);
   if (styleUndoStack.length > 200) styleUndoStack.shift();
   updateStyleUndoUI();
@@ -1721,18 +1799,22 @@ function undoStyle() {
   endStyleUndo();
   while (styleUndoStack.length) {
     const entry = styleUndoStack.pop();
-    const block = entry.block;
-    const idx = styleBlocks.indexOf(block);
-    if (idx === -1) continue;
-    if (entry.created) {
-      removePropDecl(block, entry.prop);
-      if (!declsOf(block).some((i) => i.kind === "decl")) styleBlocks.splice(idx, 1);
-    } else if (!entry.hadDecl) {
-      removePropDecl(block, entry.prop);
+    if (entry.type === "rule-removed") {
+      styleBlocks.splice(Math.min(entry.index, styleBlocks.length), 0, entry.block);
     } else {
-      setBlockProp(block, entry.prop, entry.before);
+      const block = entry.block;
+      const idx = styleBlocks.indexOf(block);
+      if (idx === -1) continue;
+      if (entry.created) {
+        removePropDecl(block, entry.prop);
+        if (!declsOf(block).some((i) => i.kind === "decl")) styleBlocks.splice(idx, 1);
+      } else if (!entry.hadDecl) {
+        removePropDecl(block, entry.prop);
+      } else {
+        setBlockProp(block, entry.prop, entry.before);
+      }
+      block.edited = true;
     }
-    block.edited = true;
     styleDirty = true;
     updateStyleSave();
     injectEditorCss(getPreviewDoc());
@@ -2297,6 +2379,50 @@ function buildVisualControls(data) {
   refreshVisualControls(data);
 }
 
+function renderInspectorMatches(data) {
+  const matches = styleBlocks
+    .filter((b) => blockMatchesElementData(b, data))
+    .sort((a, b) => getMatchPriority(a, data) - getMatchPriority(b, data));
+
+  const matchBox = document.getElementById("inspectorMatches");
+  if (!matchBox) return;
+  matchBox.innerHTML = "";
+  if (!matches.length) {
+    const note = document.createElement("div");
+    note.className = "inspector-note";
+    note.textContent = "No rules apply yet — changes below create a new rule.";
+    matchBox.appendChild(note);
+  }
+  for (const b of matches) {
+    const chip = document.createElement("div");
+    chip.className = "style-rule-prelude apply-chip";
+    const label = document.createElement("span");
+    label.className = "apply-chip-label";
+    const scopedPage = pageScopeOfRule(b);
+    label.textContent = scopedPage
+      ? `${b.prelude}  ·  ${PAGES.find((p) => p.key === scopedPage) ? PAGES.find((p) => p.key === scopedPage).label : scopedPage} only`
+      : b.prelude;
+    label.title = "Open in Rules & Code";
+    label.addEventListener("click", () => {
+      switchInspectorTab("elements");
+      const filter = document.getElementById("styleFilter");
+      filter.value = data.primary;
+      renderStyleList();
+    });
+    chip.appendChild(label);
+    const del = document.createElement("button");
+    del.className = "apply-chip-del";
+    del.textContent = "×";
+    del.title = "Remove this rule (restoreable via Undo)";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeStyleBlock(b, data);
+    });
+    chip.appendChild(del);
+    matchBox.appendChild(chip);
+  }
+}
+
 function renderInspector(data) {
   inspected = data;
   document.getElementById("inspectorEmpty").style.display = "none";
@@ -2333,38 +2459,20 @@ function renderInspector(data) {
       ? `Changes below add a scoped rule for ${currentPageLabel()} only, so other pages keep their own look.`
       : "Changes below edit the shared rule, so they apply on every page.";
   }
-
-  const matches = styleBlocks
-    .filter((b) => blockMatchesElementData(b, data))
-    .sort((a, b) => getMatchPriority(a, data) - getMatchPriority(b, data));
-
-  const matchBox = document.getElementById("inspectorMatches");
-  matchBox.innerHTML = "";
-  if (!matches.length) {
-    const note = document.createElement("div");
-    note.className = "inspector-note";
-    note.textContent = "No rules apply yet — changes below create a new rule.";
-    matchBox.appendChild(note);
+  const stateSel = document.getElementById("editState");
+  if (stateSel) stateSel.value = editStatePref;
+  const stateNote = document.getElementById("inspectorStateNote");
+  if (stateNote) {
+    const pseudo = statePseudoOf(editStatePref);
+    stateNote.textContent = pseudo
+      ? `Editing the ${ELEMENT_STATES.find((s) => s.key === editStatePref).label.toLowerCase()} state — changes write a "${pseudo}" rule that applies only while that state is active.`
+      : "Editing the normal state — these are the element's default styles.";
   }
-  for (const b of matches) {
-    const chip = document.createElement("button");
-    chip.className = "style-rule-prelude apply-chip";
-    const scopedPage = pageScopeOfRule(b);
-    chip.textContent = scopedPage
-      ? `${b.prelude}  ·  ${PAGES.find((p) => p.key === scopedPage) ? PAGES.find((p) => p.key === scopedPage).label : scopedPage} only`
-      : b.prelude;
-    chip.title = "Open in Rules & Code";
-    chip.addEventListener("click", () => {
-      switchInspectorTab("elements");
-      const filter = document.getElementById("styleFilter");
-      filter.value = data.primary;
-      renderStyleList();
-    });
-    matchBox.appendChild(chip);
-  }
+
+  renderInspectorMatches(data);
 
   populateAttachSelect("");
-  document.getElementById("newRuleSel").value = data.primary;
+  document.getElementById("newRuleSel").value = data.primary + (statePseudoOf(editStatePref) || "");
   const imageTitle = document.getElementById("inspectorImageTitle");
   if (imageTitle) imageTitle.style.display = data.tag === "img" ? "" : "none";
   buildVisualControls(data);
@@ -2402,7 +2510,10 @@ function attachToRule(data) {
 
 function addNewRule(data) {
   const raw = document.getElementById("newRuleSel").value.trim() || data.primary;
-  const sel = editScopeNow() === "all" ? raw : scopedSelector(raw);
+  let target = raw;
+  const pseudo = statePseudoOf(editStatePref);
+  if (pseudo && !target.endsWith(pseudo)) target = target + pseudo;
+  const sel = editScopeNow() === "all" ? target : scopedSelector(target);
   const exists = styleBlocks.some((b) => b.type === "rule" && b.prelude.trim() === sel);
   if (exists) {
     const status = document.getElementById("styleStatus");
@@ -2766,6 +2877,14 @@ function initStyleTab() {
         renderInspector(inspected);
         injectEditorCss(getPreviewDoc());
       }
+    });
+  }
+  const editState = document.getElementById("editState");
+  if (editState) {
+    editState.value = editStatePref;
+    editState.addEventListener("change", () => {
+      editStatePref = editState.value;
+      if (inspected) renderInspector(inspected);
     });
   }
   const pageFilter = document.getElementById("stylePageFilter");

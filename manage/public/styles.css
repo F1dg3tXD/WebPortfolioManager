@@ -946,6 +946,34 @@ body {
   gap: 4px;
 }
 
+.style-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.style-rule-head .style-rule-prelude {
+  flex: 1;
+  min-width: 0;
+}
+
+.style-rule-del {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--muted);
+  background: #2a2a2a;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+
+.style-rule-del:hover {
+  color: #ff8b8b;
+  border-color: #b32727;
+  background: #3a2424;
+}
+
 .style-rule-prelude {
   font-family: "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px;
@@ -1277,6 +1305,16 @@ body {
   flex-basis: 100%;
 }
 
+.inspector-state-note {
+  flex-basis: 100%;
+  color: #ffd9a0;
+}
+
+.edit-state {
+  flex: 1;
+  min-width: 0;
+}
+
 .rules-filter-row {
   display: flex;
   gap: 8px;
@@ -1294,8 +1332,8 @@ body {
 }
 
 .style-rule-page {
+  flex-shrink: 0;
   display: inline-block;
-  margin-top: 4px;
   padding: 1px 7px;
   border-radius: 999px;
   font-size: 10px;
@@ -1599,7 +1637,9 @@ body {
 }
 
 .apply-chip {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   text-align: left;
   border: 1px solid var(--border);
@@ -1611,10 +1651,36 @@ body {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px;
   cursor: pointer;
+}
+
+.apply-chip-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.apply-chip-del {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: #2a2a2a;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.apply-chip-del:hover {
+  color: #fff;
+  background: #b32727;
+  border-color: #b32727;
+}
+
 .apply-chip:hover {
   background: #2a2a2a;
   border-color: var(--accent);

@@ -110,6 +110,14 @@
                     <option value="all">All pages</option>
                   </select>
                   <div class="inspector-note inspector-scope-note">Page-only changes add a scoped rule so this page can look different from the others.</div>
+                  <label class="inspector-note" for="editState">Element state</label>
+                  <select id="editState" class="text-input edit-scope edit-state" title="Which element state these style changes apply to">
+                    <option value="normal">Normal</option>
+                    <option value="hover">Hover</option>
+                    <option value="active">Active</option>
+                    <option value="focus">Focus</option>
+                  </select>
+                  <div class="inspector-note inspector-state-note" id="inspectorStateNote">Editing the normal state — these are the element's default styles.</div>
                 </div>
 
                 <div class="inspector-section-title">Colors</div>
