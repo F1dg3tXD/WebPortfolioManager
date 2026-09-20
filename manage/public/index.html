@@ -71,6 +71,7 @@
             </select>
             <button id="pasteHtmlBtn" class="secondary-btn">Paste HTML</button>
             <button id="styleValuesBtn" class="secondary-btn" title="Show exact numbers">Values</button>
+            <button id="styleMotionBtn" class="secondary-btn" title="Stop animations while editing">Anims: on</button>
             <button id="refreshElementsBtn" class="secondary-btn" title="Rescan site elements">Refresh</button>
           </div>
           <div class="topbar-right">
@@ -82,7 +83,7 @@
 
         <div class="style-workspace">
           <div class="preview-col">
-            <div class="preview-hint">Click an element in the preview to edit it</div>
+            <div class="preview-hint">Click an element in the preview to edit it <span id="previewWidthBadge" class="preview-width-badge" hidden></span></div>
             <div class="preview-frame-wrap">
               <iframe id="sitePreview" class="site-preview" src="/repo/home/index.html" title="Site preview"></iframe>
             </div>
@@ -92,7 +93,17 @@
             </div>
           </div>
 
+          <div id="previewSplitter" class="preview-splitter" title="Drag to resize the preview (e.g. mobile widths)"></div>
+
           <div class="inspector-col">
+            <div class="outliner" id="outliner">
+              <div class="outliner-head">
+                <span class="outliner-title">Hierarchy</span>
+                <button id="outlinerCollapseBtn" class="outliner-toggle" title="Collapse / expand">–</button>
+              </div>
+              <div class="outliner-tree" id="outlinerTree"></div>
+            </div>
+
             <div class="inspector-tabs">
               <button class="inspector-tab inspector-tab--active" data-itab="inspect">Edit</button>
               <button class="inspector-tab" data-itab="elements">Rules &amp; Code</button>
@@ -259,6 +270,7 @@
     </div>
     <div class="color-popover-footer">
       <span id="colorHexLabel" class="color-hex" hidden></span>
+      <button id="colorEyedropBtn" class="secondary-btn" title="Pick a color from anywhere in the preview">Pick from preview…</button>
       <button id="colorClearBtn" class="secondary-btn">Transparent</button>
     </div>
   </div>
