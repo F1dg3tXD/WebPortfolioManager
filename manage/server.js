@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from "fs";
 import { exec } from "child_process";
-import { homedir } from "os";
+import { homedir, networkInterfaces } from "os";
 import { join, dirname } from "path";
 import express from "express";
 import puppeteer from "puppeteer-core";
@@ -519,6 +519,21 @@ app.get("/repo/*", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get("/api/mobile-url", (req, res) => {
+  let ip = "";
+  for (const name of Object.keys(networkInterfaces())) {
+    for (const iface of networkInterfaces()[name] || []) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        ip = iface.address;
+        break;
+      }
+    }
+    if (ip) break;
+  }
+  const port = (req.socket && req.socket.localPort) || PORT;
+  res.json({ url: `http://${ip || "localhost"}:${port}`, ip: ip || "localhost", port });
 });
 
 app.post("/api/commit", async (req, res) => {

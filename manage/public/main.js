@@ -850,7 +850,9 @@ function switchTab(name) {
   document.getElementById("panel-artdata").classList.toggle("tab-panel--active", name === "artdata");
   document.getElementById("panel-style").classList.toggle("tab-panel--active", name === "style");
   document.getElementById("panel-background").classList.toggle("tab-panel--active", name === "background");
+  document.getElementById("panel-mobile").classList.toggle("tab-panel--active", name === "mobile");
   if (name === "background") ensureBgInit();
+  if (name === "mobile") renderMobileTab();
 }
 
 function escapeHtml(s) {
@@ -3244,6 +3246,95 @@ function initPreviewSplitter() {
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
   });
+}
+
+// ── Mobile preview tab (QR + LAN URL for viewing the site on a phone) ──
+
+let mobileTabLoaded = false;
+let mobileTabData = null;
+const MOBILE_PAGES = [
+  ["Home", "home/index.html"],
+  ["About", "about/index.html"],
+  ["Portfolio", "personal/index.html"],
+  ["Game Art", "game-art/index.html"],
+];
+
+async function loadMobileUrl() {
+  if (mobileTabData) return mobileTabData;
+  try {
+    const res = await fetch("/api/mobile-url");
+    if (res.ok) {
+      mobileTabData = await res.json();
+      return mobileTabData;
+    }
+  } catch (_) {}
+  mobileTabData = { url: location.origin, ip: location.hostname, port: location.port };
+  return mobileTabData;
+}
+
+async function renderMobileTab() {
+  if (mobileTabLoaded) return;
+  const host = document.getElementById("mobileUrl");
+  const qrBox = document.getElementById("mobileQr");
+  const pages = document.getElementById("mobilePages");
+  if (!host || !qrBox || !pages) return;
+  mobileTabLoaded = true;
+
+  const info = await loadMobileUrl();
+  const base = String(info.url || "").replace(/\/$/, "");
+  host.textContent = base;
+
+  const qrUrl = `${base}/repo/home/index.html`;
+  if (window.qrcode) {
+    try {
+      const qr = window.qrcode(0, "M");
+      qr.addData(qrUrl);
+      qr.make();
+      const img = new Image();
+      img.style.width = "190px";
+      img.style.height = "190px";
+      img.alt = "QR code for the live site preview";
+      img.src = qr.createDataURL(4, 8);
+      img.addEventListener("load", () => { qrBox.textContent = ""; qrBox.appendChild(img); });
+    } catch (e) {
+      qrBox.textContent = qrUrl;
+    }
+  } else {
+    qrBox.textContent = qrUrl;
+  }
+
+  pages.innerHTML = "";
+  for (const [label, path] of MOBILE_PAGES) {
+    const a = document.createElement("a");
+    a.className = "mobile-page-link";
+    a.href = `${base}/repo/${path}`;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = label;
+    pages.appendChild(a);
+  }
+
+  const copyBtn = document.getElementById("mobileCopyBtn");
+  if (copyBtn && !copyBtn.dataset.wired) {
+    copyBtn.dataset.wired = "1";
+    copyBtn.addEventListener("click", async () => {
+      const url = host.textContent;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch (_) {
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(host);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand("copy");
+        sel.removeAllRanges();
+      }
+      const prev = copyBtn.textContent;
+      copyBtn.textContent = "Copied";
+      setTimeout(() => { copyBtn.textContent = prev; }, 1200);
+    });
+  }
 }
 
 // ── Background editor ──

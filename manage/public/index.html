@@ -12,6 +12,7 @@
       <button class="app-tab app-tab--active" data-tab="artdata">Art Data</button>
       <button class="app-tab" data-tab="style">Style</button>
       <button class="app-tab" data-tab="background">Background</button>
+      <button class="app-tab" data-tab="mobile">Mobile</button>
     </div>
 
     <div class="tab-panel tab-panel--active" id="panel-artdata">
@@ -239,6 +240,27 @@
         <div class="bg-key-editor" id="bgKeyEditor" hidden>
           <div id="bgKeySliderWrap" class="bg-key-slider-wrap"></div>
         </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="panel-mobile">
+      <div class="mobile-panel">
+        <h1 class="style-title">Mobile Preview</h1>
+        <p class="mobile-intro">Point your phone's camera at the QR code below to open this machine's live copy of the site. Your phone receives everything from this local server, so changes you make here (and pushes from this machine) appear live in the phone's mobile browser.</p>
+
+        <div class="mobile-qr-card">
+          <div class="mobile-qr" id="mobileQr"></div>
+          <div class="mobile-qr-meta">
+            <div class="mobile-url-row">
+              <code class="mobile-url" id="mobileUrl">…loading</code>
+              <button id="mobileCopyBtn" class="secondary-btn" title="Copy URL">Copy</button>
+            </div>
+            <p class="mobile-note">Keep this computer and your phone on the same Wi-Fi network. If the phone can't connect, allow the firewall to accept inbound connections for the Node.js server.</p>
+          </div>
+        </div>
+
+        <div class="inspector-section-title mobile-section-title">Open a page on your phone</div>
+        <div class="mobile-pages" id="mobilePages"></div>
       </div>
     </div>
   </div>
@@ -482,6 +504,7 @@
     </div>
   </div>
 
+  <script src="qrcode.js"></script>
   <script type="module" src="main.js"></script>
 </body>
 </html>
