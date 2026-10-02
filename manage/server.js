@@ -1,5 +1,5 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from "fs";
-import { exec } from "child_process";
+import { exec, execSync } from "child_process";
 import { homedir, networkInterfaces } from "os";
 import { join, dirname } from "path";
 import express from "express";
@@ -571,15 +571,206 @@ app.post("/api/commit", async (req, res) => {
 
 // ── ArtStation import ──
 
-const AS_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
-  Accept: "application/json,text/plain,*/*",
-  "Accept-Language": "en-US,en;q=0.9",
-  Referer: "https://www.artstation.com/",
-  Origin: "https://www.artstation.com",
-  "Cache-Control": "no-cache",
-};
+// ArtStation's JSON endpoints reject User-Agents that look stale, fake, or
+// generic. Instead of trusting a hard-coded string, we open the user JSON
+// endpoint in the user's default browser and resolve the real User-Agent that
+// browser sends (from its installed version). The result is cached so browser
+// tabs are only popped when the cache is missing or stale. In environments
+// without any browser a current Chromium-era UA is used as a fallback.
+
+const AS_UA_CACHE_PATH = join(CONFIG_DIR, "as_user_agent.json");
+const AS_UA_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+
+const AS_DEFAULT_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
+
+const KNOWN_AS_BROWSERS = [
+  { bid: "com.apple.Safari", name: "Safari", kind: "webkit", app: "Safari", bin: "Safari" },
+  { bid: "net.imput.helium", name: "Helium", kind: "webkit", app: "Helium", bin: "Helium" },
+  { bid: "company.thebrowser.Browser", name: "Arc", kind: "chromium", app: "Arc", bin: "Arc" },
+  { bid: "com.google.Chrome", name: "Chrome", kind: "chromium", app: "Google Chrome", bin: "Google Chrome" },
+  { bid: "com.google.Chrome.canary", name: "Chrome Canary", kind: "chromium", app: "Google Chrome Canary", bin: "Google Chrome Canary" },
+  { bid: "com.microsoft.edgemac", name: "Edge", kind: "chromium", app: "Microsoft Edge", bin: "Microsoft Edge" },
+  { bid: "com.brave.Browser", name: "Brave", kind: "chromium", app: "Brave Browser", bin: "Brave Browser" },
+  { bid: "com.opera.Opera", name: "Opera", kind: "chromium", app: "Opera", bin: "Opera" },
+  { bid: "org.mozilla.firefox", name: "Firefox", kind: "firefox", app: "Firefox", bin: "firefox" },
+];
+
+function artstationUsername() {
+  return config.artstationUsername || process.env.ARTSTATION_USERNAME || String(config.repo || "").split("/")[0] || "spewku";
+}
+
+function artstationProjectsUrl() {
+  return `https://www.artstation.com/users/${encodeURIComponent(artstationUsername())}/projects.json?album_id=all&page=1`;
+}
+
+function classifyArtBrowser(binary) {
+  const b = String(binary || "").toLowerCase();
+  if (b.includes("firefox")) return "firefox";
+  if (b.includes("safari") || b.includes("helium")) return "webkit";
+  return "chromium";
+}
+
+function parseDefaultBrowserBundleId() {
+  if (process.platform !== "darwin") return "";
+  const plist = join(homedir(), "Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist");
+  if (!existsSync(plist)) return "";
+  try {
+    const out = execSync(`plutil -convert json -o - "${plist}"`, { timeout: 10000 }).toString();
+    const json = JSON.parse(out);
+    const handlers = Array.isArray(json) ? json : json.LSHandlers || [];
+    for (const h of handlers) {
+      if (h && h.LSHandlerURLScheme === "https" && h.LSHandlerRoleAll && h.LSHandlerRoleAll !== "-") {
+        return h.LSHandlerRoleAll;
+      }
+    }
+  } catch {}
+  return "";
+}
+
+function browserInfoForBundle(bid) {
+  const info = KNOWN_AS_BROWSERS.find((b) => b.bid === bid) || null;
+  if (!info) return null;
+  const dirs = ["/Applications", join(homedir(), "Applications")];
+  for (const dir of dirs) {
+    const exe = join(dir, `${info.app}.app/Contents/MacOS`, info.bin);
+    if (existsSync(exe)) return { binary: exe, kind: info.kind, name: info.name };
+  }
+  try {
+    const hits = execSync(`mdfind "kMDItemCFBundleIdentifier == '${bid}'"`, { timeout: 8000 }).toString().split("\n");
+    for (const h of hits) {
+      const exe = join(h, "Contents/MacOS", info.bin);
+      if (existsSync(exe)) return { binary: exe, kind: info.kind, name: info.name };
+    }
+  } catch {}
+  return { binary: "", kind: info.kind, name: info.name };
+}
+
+function browserVersion(binary, kind) {
+  if (!binary) return "";
+  if (kind === "webkit") {
+    // WebKit apps share the system Safari engine version; prefer that so the
+    // UA carries a realistic WebKit release.
+    const plists = [
+      "/Applications/Safari.app/Contents/Info.plist",
+      join(homedir(), "Applications/Safari.app/Contents/Info.plist"),
+    ];
+    const m = binary.match(/(.*?\.app)\/Contents\/MacOS\//);
+    if (m) plists.push(`${m[1]}/Contents/Info.plist`);
+    for (const plist of plists) {
+      if (!existsSync(plist)) continue;
+      try {
+        const ver = execSync(`plutil -extract CFBundleShortVersionString raw -o - "${plist}"`, { timeout: 8000 }).toString().trim();
+        if (/^\d+(\.\d+)+$/.test(ver)) return ver;
+      } catch {}
+    }
+    return "";
+  }
+  try {
+    const out = execSync(`"${binary}" --version`, { timeout: 8000 }).toString();
+    const m = out.match(/\d+(?:\.\d+)+/);
+    return m ? m[0] : "";
+  } catch {
+    return "";
+  }
+}
+
+function uaForBrowser(kind, version) {
+  const maj = String(version || "").split(".")[0];
+  if (kind === "webkit") {
+    const parts = String(version || "26.6").split(".");
+    const minor = parts[0] || "17";
+    const arch = parts[1] || "0";
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${minor}.${arch} Safari/605.1.15`;
+  }
+  if (kind === "firefox") {
+    const v = maj || "128";
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:${v}.0) Gecko/20100101 Firefox/${v}.0`;
+  }
+  return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${maj || "132"}.0.0.0 Safari/537.36`;
+}
+
+function readCachedAsUserAgent() {
+  try {
+    const j = JSON.parse(readFileSync(AS_UA_CACHE_PATH, "utf-8"));
+    if (j && j.ua && typeof j.captured_at === "number" && Date.now() - j.captured_at < AS_UA_MAX_AGE) return j.ua;
+  } catch {}
+  return "";
+}
+
+function preferredAsBrowserExecutable() {
+  const fromConfig = process.env.AS_BROWSER || config.artstationBrowser || "";
+  if (fromConfig && existsSync(fromConfig)) return fromConfig;
+  const bid = parseDefaultBrowserBundleId();
+  if (bid) {
+    const info = browserInfoForBundle(bid);
+    if (info && info.binary) return info.binary;
+  }
+  return detectBrowserExecutable();
+}
+
+async function harvestAsUserAgent(force) {
+  const cached = readCachedAsUserAgent();
+  if (!force && cached) return cached;
+
+  // Opening the endpoint in the user's default browser: their real browser
+  // loads the JSON fine, and its genuine User-Agent is the valid one.
+  if (process.env.AS_OPEN_BROWSER !== "0") openBrowser(artstationProjectsUrl());
+
+  const binary = preferredAsBrowserExecutable();
+  const kind = classifyArtBrowser(binary);
+  let name = "";
+  if (binary) {
+    const bid = parseDefaultBrowserBundleId();
+    const info = bid ? browserInfoForBundle(bid) : null;
+    name = info && info.binary === binary ? info.name : String(binary).split("/").slice(-2, -1)[0] || binary;
+  }
+  const version = browserVersion(binary, kind);
+  const ua = uaForBrowser(kind, version);
+
+  try {
+    writeFileSync(AS_UA_CACHE_PATH, JSON.stringify({ ua, browser: name, captured_at: Date.now() }, null, 2));
+  } catch {}
+
+  return ua;
+}
+
+let asUserAgent = "";
+let asUserAgentPromise = null;
+
+function getAsUserAgent() {
+  if (!asUserAgentPromise) {
+    asUserAgentPromise = harvestAsUserAgent(false)
+      .then((ua) => {
+        asUserAgent = ua;
+        return ua;
+      })
+      .catch(() => AS_DEFAULT_UA);
+  }
+  return asUserAgentPromise;
+}
+
+function refreshAsUserAgent() {
+  asUserAgentPromise = harvestAsUserAgent(true)
+    .then((ua) => {
+      asUserAgent = ua;
+      return ua;
+    })
+    .catch(() => AS_DEFAULT_UA);
+  return asUserAgentPromise;
+}
+
+async function asHeaders() {
+  const ua = await getAsUserAgent();
+  return {
+    "User-Agent": ua,
+    Accept: "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    Referer: "https://www.artstation.com/",
+    Origin: "https://www.artstation.com",
+    "Cache-Control": "no-cache",
+  };
+}
 
 function artstationHashFromUrl(url) {
   const m = String(url || "").match(/artstation\.com\/(?:projects|artwork)\/([a-zA-Z0-9_-]+)/);
@@ -614,9 +805,11 @@ function toLargeUrl(url) {
 // ── ArtStation fetch layer ──
 // ArtStation sits behind Cloudflare, which challenges plain HTTP requests
 // (403) unless a real browser runs its JS challenge. So fetches try a plain
-// request first, then fall back to a shared headless Chromium browser that
-// solves the challenge automatically. The browser executable is resolved
-// from AS_BROWSER, config.artstationBrowser, or well-known installed paths.
+// request sporting the User-Agent resolved from the user's default browser
+// (see the ArtStation import section above), then fall back to a shared
+// headless Chromium browser that solves the challenge automatically. The
+// browser executable is resolved from AS_BROWSER, config.artstationBrowser,
+// or well-known installed paths.
 
 let asBrowser = null;
 let asBrowserLaunch = null;
@@ -637,10 +830,13 @@ function detectBrowserExecutable() {
         ]
       : platform === "darwin"
       ? [
-          "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+          "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
           "/Applications/Chromium.app/Contents/MacOS/Chromium",
           "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+          "/Applications/Opera.app/Contents/MacOS/Opera",
+          "/Applications/Arc.app/Contents/MacOS/Arc",
         ]
       : [
           "/usr/bin/google-chrome",
@@ -695,9 +891,9 @@ async function getAsPage() {
   if (asPage) return asPage;
   const browser = await getAsBrowser();
   asPage = await browser.newPage();
-  asPage.setUserAgent(
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-  );
+  // Use the real User-Agent resolved from the user's default browser instead
+  // of a hard-coded string: ArtStation rejects stale/fake ones.
+  asPage.setUserAgent(await getAsUserAgent());
   asPage.setDefaultTimeout(60000);
   return asPage;
 }
@@ -741,10 +937,17 @@ async function asBrowserFetchJson(url) {
 
 function asFetchJson(url) {
   const run = asFetchQueue.then(async () => {
-    try {
-      const response = await fetch(url, { headers: AS_HEADERS });
-      if (response.ok) return await response.json();
-    } catch {}
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await fetch(url, { headers: await asHeaders() });
+        if (response.ok) return await response.json();
+        if (attempt === 0) await refreshAsUserAgent();
+      } catch (err) {
+        if (!(err && typeof err === "object" && err.status)) {
+          if (attempt === 0) await refreshAsUserAgent().catch(() => {});
+        }
+      }
+    }
     return asBrowserFetchJson(url);
   });
   asFetchQueue = run.then(() => {}, () => {});
@@ -753,7 +956,8 @@ function asFetchJson(url) {
 
 async function fetchJsonUrl(url) {
   try {
-    const response = await fetch(url);
+    const ua = await getAsUserAgent();
+    const response = await fetch(url, { headers: { "User-Agent": ua } });
     if (response.ok) return JSON.parse(await response.text());
   } catch {}
   try {
