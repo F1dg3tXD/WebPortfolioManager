@@ -285,9 +285,18 @@ function createContextMenu() {
     { label: "Delete", action: "delete" },
     { label: "Copy", action: "copy" },
     { label: "Paste", action: "paste" },
+    { label: null, action: "sep" },
+    { label: "Send to Top", action: "send-top" },
+    { label: "Send to Bottom", action: "send-bottom" },
   ];
 
   actions.forEach(({ label, action }) => {
+    if (action === "sep") {
+      const sep = document.createElement("div");
+      sep.className = "context-menu-sep";
+      menu.appendChild(sep);
+      return;
+    }
     const btn = document.createElement("button");
     btn.className = "context-menu-item";
     btn.dataset.action = action;
@@ -327,6 +336,40 @@ function showContextMenu(x, y, idx) {
   }
 }
 
+function moveWithinCategory(srcIdx, toTop) {
+  const entry = artData[srcIdx];
+  let cat = getCategory(entry);
+  const sameCat = (e) => getCategory(e) === cat;
+
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < artData.length; i++) {
+    if (sameCat(artData[i])) {
+      if (first === -1) first = i;
+      last = i;
+    }
+  }
+
+  if (first === -1 || (toTop && srcIdx === first) || (!toTop && srcIdx === last)) {
+    renderAll();
+    return;
+  }
+
+  const [moved] = artData.splice(srcIdx, 1);
+  let insertAt;
+  if (toTop) {
+    insertAt = first > srcIdx ? first - 1 : first;
+  } else {
+    const tail = last > srcIdx ? last - 1 : last;
+    insertAt = tail + 1;
+  }
+  artData.splice(insertAt, 0, moved);
+
+  dirty = true;
+  document.getElementById("saveBtn").disabled = false;
+  renderAll();
+}
+
 function handleContextAction(action) {
   const menu = document.getElementById("contextMenu");
   menu.style.display = "none";
@@ -360,6 +403,14 @@ function handleContextAction(action) {
       dirty = true;
       document.getElementById("saveBtn").disabled = false;
       renderAll();
+      break;
+    }
+    case "send-top": {
+      moveWithinCategory(idx, true);
+      break;
+    }
+    case "send-bottom": {
+      moveWithinCategory(idx, false);
       break;
     }
   }
@@ -964,11 +1015,14 @@ function parseCSS(css) {
 }
 
 function generateCSS(blocks) {
-  const parts = blocks.map((b) => {
-    if (b.edited) return `${b.prelude} {\n${b.inner.trim()}\n}`;
-    return b.raw.trim();
-  });
-  return parts.filter((p) => p).join("\n\n") + "\n";
+  const parts = [];
+  for (const b of blocks) {
+    const p = b.edited ? `${b.prelude} {\n${b.inner.trim()}\n}` : b.raw.trim();
+    if (!p) continue;
+    if (/^[\s\u00a0]*}\s*$/.test(p)) continue; // stray closing brace from source CSS — would invalidate everything after it
+    parts.push(p);
+  }
+  return parts.join("\n\n") + "\n";
 }
 
 function selectorTokens(selector) {
@@ -1521,8 +1575,34 @@ function ensurePreviewStyles(doc) {
   if (doc.getElementById("si-styles")) return;
   const s = doc.createElement("style");
   s.id = "si-styles";
+  const rotSvg =
+    "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path fill='white' stroke='%230990f7' stroke-width='2' d='M6 14.5A8 8 0 0 1 17 6.5L20 6.5M20.5 3v4h-4'/><path fill='white' stroke='%230990f7' stroke-width='2' d='M18 14.5A8 8 0 0 1 7 18L4 18M3.5 21v-4h4'/></svg>";
   s.textContent =
-    ".si-hover{outline:2px dashed #4dc9f6 !important;outline-offset:-2px}.si-selected{outline:2px solid #0990f7 !important;outline-offset:-2px;box-shadow:0 0 0 9999px rgba(9,144,247,.10) inset}#si-paste-stage{position:fixed;left:8px;bottom:8px;z-index:9999;display:flex;flex-wrap:wrap;gap:10px;max-width:70vw;background:rgba(0,0,0,.28);padding:10px;border-radius:10px;backdrop-filter:blur(2px)}.si-paste-item{outline:1px dashed rgba(255,255,255,.55);padding:6px;max-width:200px;max-height:150px;overflow:auto;background:rgba(255,255,255,.05);cursor:pointer}";
+    ".si-hover{outline:2px dashed #4dc9f6 !important;outline-offset:-2px}.si-selected{outline:2px solid #0990f7 !important;outline-offset:-2px;box-shadow:0 0 0 9999px rgba(9,144,247,.10) inset}" +
+    "#si-paste-stage{position:fixed;left:8px;bottom:8px;z-index:9999;display:flex;flex-wrap:wrap;gap:10px;max-width:70vw;background:rgba(0,0,0,.28);padding:10px;border-radius:10px;backdrop-filter:blur(2px)}" +
+    ".si-paste-item{outline:1px dashed rgba(255,255,255,.55);padding:6px;max-width:200px;max-height:150px;overflow:auto;background:rgba(255,255,255,.05);cursor:pointer}" +
+    "#si-transform-box{position:fixed;z-index:2147483646;border:1.5px solid #0990f7;box-shadow:0 0 0 1px rgba(255,255,255,.35);pointer-events:none;padding:0;margin:0;box-sizing:border-box}" +
+    "#si-transform-box .si-tf-move{position:absolute;left:0;top:0;right:0;bottom:0;cursor:move;pointer-events:auto;touch-action:none;background:rgba(9,144,247,.05);border:0;margin:0;padding:0;z-index:1;border-radius:1px}" +
+    "#si-transform-box .si-tf-handle{position:absolute;width:11px;height:11px;background:#fff;border:1.5px solid #0990f7;border-radius:2px;pointer-events:auto;touch-action:none;box-shadow:0 1px 3px rgba(0,0,0,.35);padding:0;margin:0;z-index:2}" +
+    "#si-transform-box .si-tf-handle:hover,#si-transform-box .si-tf-handle:focus-visible{background:#4dc9f6;outline:2px solid #4dc9f6;outline-offset:2px}" +
+    "#si-transform-box .si-tf-corner{cursor:nwse-resize}" +
+    "#si-transform-box .si-tf-corner[data-c='ne'],#si-transform-box .si-tf-corner[data-c='sw']{cursor:nesw-resize}" +
+    "#si-transform-box .si-tf-edge-l,#si-transform-box .si-tf-edge-r{cursor:ew-resize}" +
+    "#si-transform-box .si-tf-edge-t,#si-transform-box .si-tf-edge-b{cursor:ns-resize}" +
+    "#si-transform-box .si-tf-nw{left:-5px;top:-5px}" +
+    "#si-transform-box .si-tf-ne{right:-5px;top:-5px}" +
+    "#si-transform-box .si-tf-sw{left:-5px;bottom:-5px}" +
+    "#si-transform-box .si-tf-se{right:-5px;bottom:-5px}" +
+    "#si-transform-box .si-tf-t{left:50%;top:-5px;transform:translateX(-50%)}" +
+    "#si-transform-box .si-tf-b{left:50%;bottom:-5px;transform:translateX(-50%)}" +
+    "#si-transform-box .si-tf-l{left:-5px;top:50%;transform:translateY(-50%)}" +
+    "#si-transform-box .si-tf-r{right:-5px;top:50%;transform:translateY(-50%)}" +
+    "#si-transform-box .si-tf-arm{position:absolute;left:50%;top:-28px;width:1.5px;height:23px;margin-left:-1px;background:#0990f7}" +
+    "#si-transform-box .si-tf-rotate{position:absolute;left:50%;top:-28px;width:15px;height:15px;transform:translate(-50%,-50%);border-radius:50%;background:#fff center/13px 13px no-repeat url(\"data:image/svg+xml;utf8," + rotSvg + "\");border:1.5px solid #0990f7;pointer-events:auto;touch-action:none;cursor:url(\"data:image/svg+xml;utf8," + rotSvg + "\") 11 11,alias;box-shadow:0 1px 3px rgba(0,0,0,.35);padding:0;margin:0;z-index:2}" +
+    "#si-transform-box .si-tf-rotate:hover,#si-transform-box .si-tf-rotate:focus-visible{background-color:#4dc9f6;outline:2px solid #4dc9f6;outline-offset:2px}" +
+    "#si-transform-box .si-tf-pivot{position:absolute;left:50%;top:50%;width:9px;height:9px;transform:translate(-50%,-50%);border-radius:50%;background:#fff;border:1.5px solid #0990f7;pointer-events:none}" +
+    "#si-transform-box:focus-visible{outline:1px solid #4dc9f6}" +
+    "#si-tf-tip{position:fixed;z-index:2147483647;font:12px/1.4 -apple-system,'Segoe UI',Roboto,sans-serif;color:#fff;background:rgba(0,0,0,.78);padding:3px 8px;border-radius:6px;pointer-events:none;white-space:nowrap}";
   (doc.head || doc.documentElement).appendChild(s);
 }
 
@@ -1530,6 +1610,7 @@ function clearPreviewSelection(doc) {
   if (!doc) return;
   doc.querySelectorAll(".si-selected").forEach((el) => el.classList.remove("si-selected"));
   selectedPreviewEl = null;
+  removeTransformWidget(doc);
 }
 
 const NO_MOTION_CSS =
@@ -1661,6 +1742,9 @@ function injectEditorCss(doc) {
     (doc.head || doc.documentElement).appendChild(s);
   }
   s.textContent = generateCSS(styleBlocks);
+  if (selectedPreviewEl && selectedPreviewEl.ownerDocument === doc && !(tfState && tfState.active)) {
+    scheduleTransformWidget();
+  }
 }
 
 function wirePreviewInspectorDoc(doc, frame) {
@@ -1686,6 +1770,543 @@ function selectPreviewElement(el) {
   data.path = selectorPath(el);
   renderInspector(data);
   renderOutlinerSelection(doc, el);
+  scheduleTransformWidget();
+}
+
+// ── Visual transform widget ──
+// Selecting an element shows a Photoshop-style transform box: 8 scale handles,
+// a rotate handle, a centered pivot and a move area. Dragging scales from the
+// centered pivot (the element stays put while it grows), rotates about that
+// pivot, or translates the element. Every change is written into the matching
+// shared CSS rule (transform + transform-origin), so it applies to every
+// instance of the element and is visible in real time.
+// Accessibility: the box is focusable — arrow keys translate (Shift = 8px),
+// [ / ] rotate, - / = scale, Home or double-click the rotate handle resets,
+// Escape closes. Changes are announced via an aria-live readout and are one
+// Undo step each (per gesture / per keystroke).
+
+let tfState = null;
+let tfRaf = 0;
+
+function tfEligible(el) {
+  if (!el || el.nodeType !== 1) return false;
+  const t = el.tagName.toLowerCase();
+  if (t === "html" || t === "body") return false;
+  if (el.closest && el.closest("#si-paste-stage")) return false;
+  return true;
+}
+
+// The rule a transform writes to — always the normal-state rule for the
+// element's selector, honoring the inspector's "this page only" / "all pages"
+// scope, so the change applies to every instance covered by that rule.
+function tfRuleFor(data) {
+  const scope = editScopeNow();
+  const key = currentPageKey();
+  const cands = styleBlocks.filter(
+    (b) => b.type === "rule" && blockMatchesElementData(b, data) && stateSuffixOf(b) === ""
+  );
+  if (scope === "all") {
+    const shared = cands.find((b) => !isScopedRule(b));
+    return shared || createRuleFor(data, null, "");
+  }
+  const paged = cands.find((b) => isScopedRule(b) && pageScopeOfRule(b) === key);
+  if (paged) return paged;
+  if (!key) return cands[0] || createRuleFor(data, null, "");
+  return createRuleFor(data, key, "");
+}
+
+function tfRound1(v) {
+  return Math.round(v * 10) / 10;
+}
+
+function tfParse(css) {
+  const s = { dx: 0, dy: 0, rot: 0, sx: 1, sy: 1 };
+  if (!css || css === "none") return s;
+  const tr = /translate3d\(([^)]+)\)|translate\(([^)]+)\)/.exec(css);
+  if (tr) {
+    const parts = (tr[1] || tr[2]).split(",").map((x) => parseFloat(x));
+    if (isFinite(parts[0])) s.dx = parts[0];
+    if (isFinite(parts[1])) s.dy = parts[1];
+  }
+  const rm = /rotate(?:Z)?\(([^)]+)\)/.exec(css);
+  if (rm) {
+    const r = parseFloat(rm[1]);
+    if (isFinite(r)) s.rot = r;
+  }
+  const sm = /scale(?:X|Y|3d)?\(([^)]+)\)/.exec(css);
+  if (sm) {
+    const p = sm[1].split(",").map((x) => parseFloat(x));
+    if (isFinite(p[0])) s.sx = p[0];
+    if (isFinite(p[1])) s.sy = p[1];
+  }
+  const mm = /matrix\(([^)]+)\)/.exec(css);
+  if (mm) {
+    const p = mm[1].split(",").map((x) => parseFloat(x));
+    if (p.length >= 6 && isFinite(p[0]) && isFinite(p[1])) {
+      const sx = Math.hypot(p[0], p[1]);
+      const sy = Math.hypot(p[2], p[3]);
+      if (sx > 0.0001) s.sx = sx;
+      if (sy > 0.0001) s.sy = sy;
+      s.rot = (Math.atan2(p[1], p[0]) * 180) / Math.PI;
+      if (isFinite(p[4])) s.dx = p[4];
+      if (isFinite(p[5])) s.dy = p[5];
+    }
+  }
+  return s;
+}
+
+function tfSerialize(s) {
+  return (
+    `translate(${tfRound1(s.dx)}px, ${tfRound1(s.dy)}px) ` +
+    `rotate(${tfRound1(s.rot)}deg) ` +
+    `scale(${s.sx.toFixed(3)}, ${s.sy.toFixed(3)})`
+  );
+}
+
+function ensureTransformWidget(doc) {
+  let box = doc.getElementById("si-transform-box");
+  if (!box) {
+    box = doc.createElement("div");
+    box.id = "si-transform-box";
+    box.setAttribute("role", "application");
+    box.setAttribute("tabindex", "0");
+    box.setAttribute(
+      "aria-label",
+      "Transform selected element. Drag a corner to scale from the center, an edge to stretch, the round handle to rotate, or the box to move. Arrow keys translate (Shift = 8px), [ and ] rotate, - and = scale, Home or double-click the rotate handle resets, Escape closes."
+    );
+    box.innerHTML =
+      `<button class="si-tf-handle si-tf-corner si-tf-nw" data-c="nw" type="button" tabindex="-1" aria-label="Scale from top-left"></button>` +
+      `<button class="si-tf-handle si-tf-corner si-tf-ne" data-c="ne" type="button" tabindex="-1" aria-label="Scale from top-right"></button>` +
+      `<button class="si-tf-handle si-tf-corner si-tf-sw" data-c="sw" type="button" tabindex="-1" aria-label="Scale from bottom-left"></button>` +
+      `<button class="si-tf-handle si-tf-corner si-tf-se" data-c="se" type="button" tabindex="-1" aria-label="Scale from bottom-right"></button>` +
+      `<button class="si-tf-handle si-tf-edge si-tf-t" data-e="t" type="button" tabindex="-1" aria-label="Scale height from the top edge"></button>` +
+      `<button class="si-tf-handle si-tf-edge si-tf-b" data-e="b" type="button" tabindex="-1" aria-label="Scale height from the bottom edge"></button>` +
+      `<button class="si-tf-handle si-tf-edge si-tf-l" data-e="l" type="button" tabindex="-1" aria-label="Scale width from the left edge"></button>` +
+      `<button class="si-tf-handle si-tf-edge si-tf-r" data-e="r" type="button" tabindex="-1" aria-label="Scale width from the right edge"></button>` +
+      `<div class="si-tf-arm"></div>` +
+      `<button class="si-tf-rotate" type="button" tabindex="-1" aria-label="Rotate around the center pivot. Drag or use [ and ]"></button>` +
+      `<div class="si-tf-pivot"></div>` +
+      `<button class="si-tf-move" type="button" tabindex="-1" aria-label="Move the element. Drag or use arrow keys"></button>`;
+    box.style.display = "none";
+    box.addEventListener("pointerdown", tfPointerDown);
+    box.addEventListener("pointermove", tfPointerMove);
+    box.addEventListener("pointerup", tfPointerEnd);
+    box.addEventListener("pointercancel", tfPointerCancel);
+    box.addEventListener("dblclick", tfDoubleClick);
+    box.addEventListener("keydown", tfKeyDown);
+    const tip = doc.createElement("div");
+    tip.id = "si-tf-tip";
+    tip.setAttribute("role", "status");
+    tip.setAttribute("aria-live", "polite");
+    tip.style.display = "none";
+    (doc.body || doc.documentElement).appendChild(box);
+    (doc.body || doc.documentElement).appendChild(tip);
+  }
+  return box;
+}
+
+function removeTransformWidget(doc) {
+  if (!doc) doc = getPreviewDoc();
+  if (doc) {
+    const box = doc.getElementById("si-transform-box");
+    if (box) box.remove();
+    const tip = doc.getElementById("si-tf-tip");
+    if (tip) tip.remove();
+  }
+  tfState = null;
+  tfRaf = 0;
+}
+
+function scheduleTransformWidget() {
+  if (tfRaf) return;
+  tfRaf = requestAnimationFrame(() => {
+    tfRaf = 0;
+    renderTransformWidget();
+  });
+}
+
+function renderTransformWidget() {
+  const doc = getPreviewDoc();
+  if (!doc) {
+    removeTransformWidget();
+    return;
+  }
+  const el = selectedPreviewEl;
+  if (!el || el.ownerDocument !== doc || !tfEligible(el)) {
+    const box = doc.getElementById("si-transform-box");
+    if (box) box.style.display = "none";
+    return;
+  }
+  const box = ensureTransformWidget(doc);
+  const s = ensureTfState(doc);
+  if (!s) {
+    box.style.display = "none";
+    return;
+  }
+  const r = el.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2 || !isFinite(r.left)) {
+    box.style.display = "none";
+    return;
+  }
+  const cx = r.left + r.width / 2 - s.dx;
+  const cy = r.top + r.height / 2 - s.dy;
+  const visW = Math.max(2, s.baseW * s.sx);
+  const visH = Math.max(2, s.baseH * s.sy);
+  box.style.left = cx + s.dx + "px";
+  box.style.top = cy + s.dy + "px";
+  box.style.width = visW + "px";
+  box.style.height = visH + "px";
+  box.style.transform = `translate(-50%, -50%) rotate(${s.rot}deg)`;
+  box.style.display = "block";
+}
+
+function ensureTfState(doc) {
+  const el = selectedPreviewEl;
+  if (!doc || !el || el.ownerDocument !== doc || !tfEligible(el)) return null;
+  if (tfState && tfState.el === el && tfState.doc === doc) {
+    const cur = getBlockProp(tfState.block, "transform") || "";
+    if (cur && cur !== tfSerialize(tfState)) {
+      tfState = buildTfState(doc, el, tfState.data, tfState.block);
+    }
+    return tfState;
+  }
+  const data = elementData(el);
+  data.path = selectorPath(el);
+  const block = tfRuleFor(data);
+  tfState = buildTfState(doc, el, data, block);
+  return tfState;
+}
+
+function buildTfState(doc, el, data, block) {
+  const init = tfParse(getBlockProp(block, "transform") || "");
+  return {
+    active: false,
+    gesture: null,
+    doc,
+    el,
+    data,
+    block,
+    created: block.__justCreated === true,
+    dx: init.dx,
+    dy: init.dy,
+    rot: init.rot,
+    sx: init.sx,
+    sy: init.sy,
+    baseW: Math.max(1, el.offsetWidth || 1),
+    baseH: Math.max(1, el.offsetHeight || 1),
+    moved: false,
+    prevTransform: null,
+    prevOrigin: null,
+  };
+}
+
+function showTfTip(s, text) {
+  if (!s || !s.doc) return;
+  const tip = s.doc.getElementById("si-tf-tip");
+  if (!tip) return;
+  tip.textContent = text;
+  const box = s.doc.getElementById("si-transform-box");
+  if (box) {
+    const br = box.getBoundingClientRect();
+    tip.style.left = Math.max(4, br.left) + "px";
+    tip.style.top = Math.max(4, br.top - 24) + "px";
+  }
+  tip.style.display = "block";
+}
+
+function writeTfCss() {
+  const s = tfState;
+  if (!s || !s.doc) return;
+  setBlockProp(s.block, "transform", tfSerialize(s));
+  setBlockProp(s.block, "transform-origin", "center");
+  s.block.edited = true;
+  styleDirty = true;
+  updateStyleSave();
+  injectEditorCss(s.doc);
+  renderTransformWidget();
+  showTfTip(
+    s,
+    `${Math.round(s.sx * 100)}% × ${Math.round(s.sy * 100)}% · ${tfRound1(s.rot)}° · X${tfRound1(s.dx)} Y${tfRound1(s.dy)}`
+  );
+}
+
+function tfPointerDown(e) {
+  const target = e.target && e.target.closest ? e.target.closest(".si-tf-handle, .si-tf-rotate, .si-tf-move") : null;
+  if (!target) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const box = e.currentTarget;
+  const doc = box.ownerDocument;
+  const s = ensureTfState(doc);
+  if (!s || !s.doc) return;
+  try { box.setPointerCapture(e.pointerId); } catch (_) {}
+  const r = s.el.getBoundingClientRect();
+  const c = (target.dataset.c || "").slice();
+  const ed = target.dataset.e || "";
+  let mode = "move";
+  let kw = 0, kh = 0;
+  if (target.classList.contains("si-tf-rotate")) {
+    mode = "rotate";
+  } else if (target.classList.contains("si-tf-corner")) {
+    mode = "scale";
+    kw = c && c[1] === "w" ? -1 : 1;
+    kh = c && c[0] === "n" ? -1 : 1;
+  } else if (target.classList.contains("si-tf-edge")) {
+    mode = "scale";
+    if (ed === "l") { kw = -1; kh = 0; }
+    else if (ed === "r") { kw = 1; kh = 0; }
+    else if (ed === "t") { kw = 0; kh = -1; }
+    else { kw = 0; kh = 1; }
+  }
+  const cx = r.left + r.width / 2 - s.dx;
+  const cy = r.top + r.height / 2 - s.dy;
+  s.gesture = {
+    mode,
+    kw,
+    kh,
+    x: e.clientX,
+    y: e.clientY,
+    dx: s.dx,
+    dy: s.dy,
+    rot: s.rot,
+    sx: s.sx,
+    sy: s.sy,
+    cx,
+    cy,
+    vw0: Math.max(2, s.baseW * s.sx) / 2,
+    vh0: Math.max(2, s.baseH * s.sy) / 2,
+    px0: e.clientX - cx,
+    py0: e.clientY - cy,
+  };
+  s.prevTransform = getBlockProp(s.block, "transform") || "";
+  s.prevOrigin = getBlockProp(s.block, "transform-origin") || "";
+  s.moved = false;
+  s.active = true;
+}
+
+function clampTf(f) {
+  return Math.max(0.05, Math.min(20, f));
+}
+
+function tfPointerMove(e) {
+  const s = tfState;
+  if (!s || !s.gesture || !s.active) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const g = s.gesture;
+  if (g.mode === "move") {
+    s.dx = g.dx + (e.clientX - g.x);
+    s.dy = g.dy + (e.clientY - g.y);
+  } else if (g.mode === "rotate") {
+    const ax = e.clientX - g.cx;
+    const ay = e.clientY - g.cy;
+    if (Math.hypot(ax, ay) < 6) return;
+    const ang = Math.atan2(ay, ax);
+    const base = Math.atan2(g.py0, g.px0);
+    s.rot = g.rot + ((ang - base) * 180) / Math.PI;
+  } else {
+    const th = (-g.rot * Math.PI) / 180;
+    const px = e.clientX - g.cx;
+    const py = e.clientY - g.cy;
+    const lx = px * Math.cos(th) - py * Math.sin(th);
+    const ly = px * Math.sin(th) + py * Math.cos(th);
+    if (g.kw && g.kh) {
+      const f = Math.hypot(lx, ly) / Math.hypot(g.vw0, g.vh0);
+      s.sx = clampTf(f);
+      s.sy = clampTf(f);
+    } else if (g.kw) {
+      s.sx = clampTf(Math.abs(lx) / g.vw0);
+    } else if (g.kh) {
+      s.sy = clampTf(Math.abs(ly) / g.vh0);
+    }
+  }
+  s.moved = true;
+  writeTfCss();
+}
+
+function tfPointerEnd(e) {
+  const s = tfState;
+  if (!s || !s.active) return;
+  s.active = false;
+  const box = e.currentTarget || (s.doc && s.doc.getElementById("si-transform-box"));
+  if (box && typeof e.pointerId === "number") {
+    try { box.releasePointerCapture(e.pointerId); } catch (_) {}
+  }
+  tfFinalize();
+}
+
+function tfPointerCancel() {
+  const s = tfState;
+  if (!s || !s.active) return;
+  s.active = false;
+  if (s.gesture) {
+    removePropDecl(s.block, "transform");
+    removePropDecl(s.block, "transform-origin");
+    if (s.prevTransform) setBlockProp(s.block, "transform", s.prevTransform);
+    if (s.prevOrigin) setBlockProp(s.block, "transform-origin", s.prevOrigin);
+    s.dx = s.gesture.dx;
+    s.dy = s.gesture.dy;
+    s.rot = s.gesture.rot;
+    s.sx = s.gesture.sx;
+    s.sy = s.gesture.sy;
+    s.gesture = null;
+    s.moved = false;
+    styleDirty = true;
+    updateStyleSave();
+    injectEditorCss(s.doc);
+  }
+}
+
+function captureBefore(s) {
+  s.prevTransform = getBlockProp(s.block, "transform") || "";
+  s.prevOrigin = getBlockProp(s.block, "transform-origin") || "";
+}
+
+function commitTfKey(s) {
+  pushStyleUndo({
+    type: "tf-transform",
+    block: s.block,
+    created: false,
+    before: s.prevTransform || "",
+    beforeOrigin: s.prevOrigin || "",
+    after: tfSerialize(s),
+    afterOrigin: "center",
+  });
+  renderStyleList();
+  refreshVisualControls(s.data);
+  renderInspectorMatches(s.data);
+}
+
+function tfKeyDown(e) {
+  const box = e.currentTarget;
+  if (!box) return;
+  const doc = box.ownerDocument;
+  const s = ensureTfState(doc);
+  if (!s) return;
+  const k = e.key;
+  let changed = false;
+  if (k === "ArrowRight" || k === "ArrowLeft" || k === "ArrowUp" || k === "ArrowDown") {
+    e.preventDefault();
+    e.stopPropagation();
+    captureBefore(s);
+    const step = e.shiftKey ? 8 : 1;
+    if (k === "ArrowRight") s.dx += step;
+    else if (k === "ArrowLeft") s.dx -= step;
+    else if (k === "ArrowUp") s.dy -= step;
+    else s.dy += step;
+    changed = true;
+  } else if (k === "[" || k === "]" || k === "{" || k === "}") {
+    e.preventDefault();
+    e.stopPropagation();
+    captureBefore(s);
+    const d = k === "[" || k === "{" ? -1 : 1;
+    s.rot = s.rot + d * (e.shiftKey ? 5 : 1);
+    changed = true;
+  } else if (k === "-" || k === "_" || k === "=" || k === "+") {
+    e.preventDefault();
+    e.stopPropagation();
+    captureBefore(s);
+    const d = k === "-" || k === "_" ? -1 : 1;
+    const p = (e.shiftKey ? 5 : 1) / 100;
+    s.sx = clampTf(s.sx + d * p);
+    s.sy = clampTf(s.sy + d * p);
+    changed = true;
+  } else if (k === "Home") {
+    e.preventDefault();
+    e.stopPropagation();
+    tfReset();
+    return;
+  } else if (k === "Escape" || k === "Enter") {
+    e.preventDefault();
+    e.stopPropagation();
+    removeTransformWidget();
+    return;
+  }
+  if (changed) {
+    s.moved = true;
+    writeTfCss();
+    commitTfKey(s);
+    s.moved = false;
+    scheduleTransformWidget();
+  }
+}
+
+function tfDoubleClick(e) {
+  if (e.target && e.target.closest && e.target.closest(".si-tf-rotate")) {
+    e.preventDefault();
+    e.stopPropagation();
+    tfReset();
+  }
+}
+
+function tfReset() {
+  const s = tfState;
+  if (!s || !s.doc) return;
+  const block = s.block;
+  const before = getBlockProp(block, "transform") || "";
+  const beforeOrigin = getBlockProp(block, "transform-origin") || "";
+  if (!before && !beforeOrigin) return;
+  removePropDecl(block, "transform");
+  removePropDecl(block, "transform-origin");
+  block.edited = true;
+  styleDirty = true;
+  updateStyleSave();
+  injectEditorCss(s.doc);
+  pushStyleUndo({
+    type: "tf-transform",
+    block,
+    created: s.created,
+    before,
+    beforeOrigin,
+    after: "",
+    afterOrigin: "",
+  });
+  showTfTip(s, "Transform reset");
+  setTimeout(() => {
+    const tip = s.doc.getElementById("si-tf-tip");
+    if (tip) tip.style.display = "none";
+  }, 1400);
+  s.dx = 0;
+  s.dy = 0;
+  s.rot = 0;
+  s.sx = 1;
+  s.sy = 1;
+  s.moved = false;
+  renderTransformWidget();
+}
+
+function tfFinalize() {
+  const s = tfState;
+  if (!s) return;
+  const tip = s.doc && s.doc.getElementById("si-tf-tip");
+  if (tip && !s.moved) tip.style.display = "none";
+  if (s.moved) {
+    const after = tfSerialize(s);
+    const changed = s.prevTransform !== after || (s.prevOrigin || "") !== "center";
+    if (changed) {
+      pushStyleUndo({
+        type: "tf-transform",
+        block: s.block,
+        created: s.created,
+        before: s.prevTransform || "",
+        beforeOrigin: s.prevOrigin || "",
+        after,
+        afterOrigin: "center",
+      });
+    }
+    renderStyleList();
+    refreshVisualControls(s.data);
+    renderInspectorMatches(s.data);
+    const status = document.getElementById("styleStatus");
+    if (status) {
+      status.textContent = `Transform updated (scale ${Math.round(s.sx * 100)}% × ${Math.round(s.sy * 100)}%, rotate ${tfRound1(s.rot)}°, X${tfRound1(s.dx)} Y${tfRound1(s.dy)}) for ${s.data.primary} — applies to every instance.`;
+      status.className = "status-msg success";
+    }
+  }
+  s.active = false;
+  s.gesture = null;
+  s.moved = false;
+  scheduleTransformWidget();
 }
 
 function wirePreviewInspector() {
@@ -1702,6 +2323,8 @@ function wirePreviewInspector() {
       e.preventDefault();
       e.stopPropagation();
       if (ignoreNextPreviewClick) { ignoreNextPreviewClick = false; return; }
+      if (tfState && tfState.active) return;
+      if (e.target && e.target.closest && e.target.closest("#si-transform-box")) return;
       selectPreviewElement(e.target);
     },
     true
@@ -1712,6 +2335,7 @@ function wirePreviewInspector() {
     (e) => {
       const el = e.target;
       if (!el || el.nodeType !== 1) return;
+      if ((el.closest && el.closest("#si-transform-box")) || (tfState && tfState.active)) return;
       doc.querySelectorAll(".si-hover").forEach((n) => n !== el && n.classList.remove("si-hover"));
       el.classList.add("si-hover");
     },
@@ -1722,6 +2346,12 @@ function wirePreviewInspector() {
     const el = e.target;
     if (el && el.nodeType === 1) el.classList.remove("si-hover");
   });
+
+  const dw = doc.defaultView;
+  if (dw) {
+    dw.addEventListener("resize", scheduleTransformWidget);
+    dw.addEventListener("scroll", scheduleTransformWidget, true);
+  }
 
   doc.addEventListener("submit", (e) => e.preventDefault());
 }
@@ -1914,7 +2544,7 @@ function endStyleUndo() {
 }
 
 function pushStyleUndo(entry) {
-  if (entry.type !== "rule-removed" && entry.before === entry.after) return;
+  if (entry.type !== "rule-removed" && entry.type !== "scale-resize" && entry.before === entry.after) return;
   styleUndoStack.push(entry);
   if (styleUndoStack.length > 200) styleUndoStack.shift();
   updateStyleUndoUI();
@@ -1934,12 +2564,38 @@ function removePropDecl(block, prop) {
   block.inner = serializeDecls(decls);
 }
 
+function applySize(block, w, h) {
+  const set = (prop, val) => {
+    if (val == null || val === "") removePropDecl(block, prop);
+    else setBlockProp(block, prop, String(val).trim());
+  };
+  set("width", w);
+  set("height", h);
+}
+
 function undoStyle() {
   endStyleUndo();
   while (styleUndoStack.length) {
     const entry = styleUndoStack.pop();
     if (entry.type === "rule-removed") {
       styleBlocks.splice(Math.min(entry.index, styleBlocks.length), 0, entry.block);
+    } else if (entry.type === "scale-resize") {
+      const block = entry.block;
+      const idx = styleBlocks.indexOf(block);
+      if (idx === -1) continue;
+      applySize(block, entry.w, entry.h);
+      if (entry.created && !declsOf(block).some((i) => i.kind === "decl")) styleBlocks.splice(idx, 1);
+      block.edited = true;
+    } else if (entry.type === "tf-transform") {
+      const block = entry.block;
+      const idx = styleBlocks.indexOf(block);
+      if (idx === -1) continue;
+      removePropDecl(block, "transform");
+      removePropDecl(block, "transform-origin");
+      if (entry.before) setBlockProp(block, "transform", entry.before);
+      if (entry.beforeOrigin) setBlockProp(block, "transform-origin", entry.beforeOrigin);
+      if (entry.created && !declsOf(block).some((i) => i.kind === "decl")) styleBlocks.splice(idx, 1);
+      block.edited = true;
     } else {
       const block = entry.block;
       const idx = styleBlocks.indexOf(block);
@@ -3144,6 +3800,7 @@ function initStyleTab() {
 
   const preview = document.getElementById("sitePreview");
   preview.addEventListener("load", wirePreviewInspector);
+  window.addEventListener("resize", scheduleTransformWidget);
   if (preview.contentDocument && preview.contentDocument.readyState === "complete") wirePreviewInspector();
   document.getElementById("previewPage").addEventListener("change", (e) => {
     loadPreviewPage(e.target.value);

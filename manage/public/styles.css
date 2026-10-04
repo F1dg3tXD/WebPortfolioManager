@@ -752,6 +752,12 @@ body {
   color: var(--text);
 }
 
+.context-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
 .card.dnd-before {
   border-top: 2px solid var(--accent);
 }
@@ -1522,7 +1528,32 @@ body {
   font-size: 10px;
   color: var(--muted);
   word-break: break-all;
-  padding-top: 4px;
+}
+
+.inspector-scale-hint {
+  margin: 8px 0;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px dashed rgba(9, 144, 247, 0.45);
+  border-radius: var(--radius-md);
+}
+
+.inspector-scale-hint kbd {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.inspector-scale-hint .scale-hint-icon {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .inspector-section-title {
