@@ -1351,7 +1351,7 @@ async function saveStyle() {
   btn.disabled = true;
   const pushing = [];
   if (styleDirty) pushing.push("style.css");
-  if (pendingImageUploads.length) pushing.push(`${pendingImageUploads.length} image${pendingImageUploads.length === 1 ? "" : "s"}`);
+  if (pendingImageUploads.length) pushing.push(`${pendingImageUploads.length} file${pendingImageUploads.length === 1 ? "" : "s"}`);
   status.textContent = `Pushing ${pushing.join(" + ")} to GitHub...`;
   status.className = "status-msg";
   try {
@@ -1384,7 +1384,7 @@ async function saveStyle() {
       }
       const result = await res.json();
       pendingImageUploads.length = 0;
-      status.textContent = `Images replaced! (${result.files.length})`;
+      status.textContent = `Saved ${result.files.length} file${result.files.length === 1 ? "" : "s"}!`;
       status.className = "status-msg success";
     } else {
       status.textContent = `style.css saved! SHA: ${styleSha ? styleSha.slice(0, 7) : "?"}`;
@@ -3085,11 +3085,118 @@ function safeText(s) {
   return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// A deterministic per-page file name for an image copy, e.g.
+// personal/pfp.png on Home -> img/pfp-home.png. Copies live in the site's
+// img/ directory so every page can keep — and later replace — its own image.
+function perPageImagePath(repoPath, pageKey) {
+  const ext = (repoPath.split(".").pop() || "").toLowerCase();
+  const stem = (repoPath.split("/").pop() || "image").replace(/\.[^.]+$/, "");
+  const clean = stem.replace(/[^A-Za-z0-9._-]/g, "-").replace(/^\.+/, "") || "image";
+  return `img/${clean}-${pageKey}.${ext}`;
+}
+
+// Replacing an image that already has a per-page copy targets that same copy,
+// so replacing one page's image again overwrites its own file rather than
+// piling up new files.
+function perPageReplaceTarget(repoPath, pageKey) {
+  if (repoPath.startsWith("img/")) {
+    const re = new RegExp(`^img/(.+-${escapeRegExp(pageKey)})\\.[a-z0-9]+$`);
+    if (re.test(repoPath)) return repoPath;
+  }
+  return perPageImagePath(repoPath, pageKey);
+}
+
+async function fetchRawPage(path) {
+  const res = await fetch("/api/raw?path=" + encodeURIComponent(path));
+  if (!res.ok) return null;
+  const blob = await res.json();
+  if (!blob || typeof blob.content !== "string") return null;
+  try {
+    const bytes = Uint8Array.from(atob(blob.content), (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Rewrites every reference to repoPath inside a page's HTML so it points at
+// the per-page copy. Handles absolute (/img/x.png), relative (img/x.png) and
+// ../-prefixed references, preserving any query/hash that follows the path.
+// Returns the updated HTML (or the original unchanged if nothing matched).
+function rewriteRepoSrc(html, repoPath, newPath) {
+  const esc = escapeRegExp(repoPath);
+  const re = new RegExp("((?:src|href|poster|data-src)\\s*=\\s*[\"'])((?:/|\\.\\./)*)" + esc + "([^\"'\\s]*)([\"'])", "g");
+  return html.replace(re, (m, pre, lead, rest, q) => `${pre}/${newPath}${rest}${q}`);
+}
+
+// Stages a replacement so it is pushed with the normal Save button:
+//  - the new image goes to a deterministic per-page copy under img/ (or
+//    overwrites in place when there is no page context), and
+//  - the current page's own HTML is rewritten to reference that copy, so
+//    other pages keep their original image untouched.
+async function stageImageReplacement({ repoPath, dataURL, converted, targetExt, pageKey, page }) {
+  const data64 = dataURL.split(",")[1];
+  if (!page || !pageKey) {
+    pendingImageUploads = pendingImageUploads.filter((f) => f.path !== repoPath);
+    pendingImageUploads.push({ kind: "img", path: repoPath, content: data64, encoding: "base64" });
+    return {
+      note: converted
+        ? `Image staged to replace ${repoPath} (re-encoded to ${targetExt.toUpperCase()}).`
+        : `Image staged to replace ${repoPath}.`,
+      pageEdited: false,
+    };
+  }
+  const newPath = perPageReplaceTarget(repoPath, pageKey);
+  pendingImageUploads = pendingImageUploads.filter((f) => f.kind === "img" && f.path !== newPath);
+  pendingImageUploads.push({ kind: "img", path: newPath, content: data64, encoding: "base64" });
+
+  let pageEdited = false;
+  const pagePath = page.path;
+  try {
+    const idx = pendingImageUploads.findIndex((f) => f.kind === "page" && f.path === pagePath);
+    let html = idx >= 0 ? pendingImageUploads[idx].content : await fetchRawPage(pagePath);
+    if (html == null) throw new Error("could not read page HTML");
+    const next = rewriteRepoSrc(html, repoPath, newPath);
+    if (next !== html) {
+      pendingImageUploads[idx >= 0 ? idx : pendingImageUploads.length] = {
+        kind: "page",
+        path: pagePath,
+        content: next,
+        encoding: "utf8",
+      };
+      pageEdited = true;
+    }
+  } catch (e) {
+    // The image is still staged; the page HTML just won't be rewritten.
+  }
+  const isCopy = repoPath !== newPath;
+  let note = converted
+    ? `Image staged (re-encoded to ${targetExt.toUpperCase()}).`
+    : `Image staged.`;
+  if (pageEdited) {
+    note = isCopy
+      ? `Image staged as copy for ${page.label} only → ${newPath}. Page HTML updated; other pages keep their image.`
+      : `Image staged as replacement for this page's copy (${newPath}).`;
+  } else if (isCopy) {
+    note = `Image staged as copy for ${page.label} only → ${newPath}. Page HTML wasn't updated — this image may be added by script or referenced elsewhere.`;
+  } else {
+    note = `Image staged as replacement for this page's copy (${newPath}).`;
+  }
+  return { note, pageEdited };
+}
+
 // "Replace image" card shown under the scale & position sliders for any <img>
 // element. Staging the file enables the normal Save to GitHub button, which
-// pushes it to the repo in place so existing references keep working.
+// pushes a per-page copy into img/ and rewrites this page's HTML so the other
+// pages keep their current image.
 function renderImageReplace(data, container) {
-  const src = data.attrs && data.attrs.src;
+  let src = data.attrs && data.attrs.src;
+  const stored = selectedPreviewEl && selectedPreviewEl.getAttribute("data-si-src");
+  if (stored && !repoPathFromSrc(src)) src = stored;
   const repoPath = repoPathFromSrc(src);
   const art = repoPath ? isArtImagePath(repoPath) : false;
   const el = document.createElement("div");
@@ -3099,7 +3206,7 @@ function renderImageReplace(data, container) {
     const note = art
       ? "Art gallery image — manage it in the Art Data tab."
       : repoPath
-        ? "Upload a file to overwrite this image in the site repo."
+        ? "Save will copy this image into the site's img/ folder for this page only — other pages keep the current image."
         : "This image is external — replace via its source URL.";
     inner =
       `<div class="img-replace-thumb"><img src="${safeText(src)}" alt="" /></div>` +
@@ -3136,15 +3243,17 @@ function renderImageReplace(data, container) {
     try {
       const targetExt = (repoPath.split(".").pop() || "").toLowerCase();
       const { dataURL, preview, converted } = await fileToUploadBytes(file, targetExt);
-      pendingImageUploads = pendingImageUploads.filter((f) => f.path !== repoPath);
-      pendingImageUploads.push({ path: repoPath, content: dataURL.split(",")[1], encoding: "base64" });
-      if (inspectedElRef) inspectedElRef.src = preview;
+      const pageKey = currentPageKey();
+      const page = PAGES.find((p) => p.key === pageKey);
+      const staged = await stageImageReplacement({ repoPath, dataURL, converted, targetExt, pageKey, page });
+      if (inspectedElRef) {
+        inspectedElRef.src = preview;
+        inspectedElRef.setAttribute("data-si-src", "/" + repoPath);
+      }
       const thumb = el.querySelector(".img-replace-thumb img");
       if (thumb) thumb.src = preview;
       updateStyleSave();
-      status.textContent = converted
-        ? `Image staged to replace ${repoPath} (re-encoded to ${targetExt.toUpperCase()}). Press Save to GitHub.`
-        : `Image staged to replace ${repoPath}. Press Save to GitHub.`;
+      status.textContent = staged.note + " Press Save to GitHub.";
       status.className = "status-msg success";
     } catch (e) {
       if (inspectedElRef && pristine) inspectedElRef.src = pristine;

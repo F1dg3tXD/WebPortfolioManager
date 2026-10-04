@@ -210,6 +210,30 @@ app.put("/api/style", async (req, res) => {
   }
 });
 
+// Raw (unrewritten) repo file for page-image replacement: returns the stored
+// content as base64 plus its SHA so the client can rewrite a page's own HTML
+// (e.g. point an <img src> at a per-page copy) without going through the
+// preview proxy, which would alter the text.
+app.get("/api/raw", async (req, res) => {
+  try {
+    const path = String(req.query.path || "").replace(/^\/+/, "");
+    if (!path || path.split("/").some((s) => s === "..")) {
+      return res.status(400).json({ error: "invalid path" });
+    }
+    const api = `https://api.github.com/repos/${config.repo}/contents/${path}`;
+    const response = await fetch(api, { headers: getAuthHeaders() });
+    if (response.ok) {
+      const { content, sha } = await response.json();
+      return res.json({ content, sha });
+    }
+    if (response.status === 404) return res.json({ content: null, sha: null });
+    const err = await response.json();
+    return res.status(response.status).json({ error: err.message || `HTTP ${response.status}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Unique HTML elements used across the site (classes, ids, tags).
 // Excludes pages that do not load /style.css (404.html, background/) and
 // the pure-redirect pages (index.html, socials/index.html).
@@ -419,14 +443,17 @@ app.put("/api/upload", async (req, res) => {
       if (filePath.split("/").some((s) => s === "..")) {
         return res.status(400).json({ error: `invalid path: ${filePath}` });
       }
-      if (!ALLOWED_IMG.includes(extOf(filePath))) {
-        return res.status(400).json({ error: `path must be an image file: ${filePath}` });
-      }
       const enc = f.encoding === "utf8" ? "utf8" : "base64";
-      const content = enc === "utf8"
+      const isText = enc === "utf8";
+      const content = isText
         ? Buffer.from(String(f.content || ""), "utf-8").toString("base64")
         : String(f.content || "");
       if (!content) return res.status(400).json({ error: `content is required for ${filePath}` });
+      // utf8 entries (e.g. a page's HTML rewritten to point at a per-page
+      // image copy) may target any repo file; base64 is limited to images.
+      if (!isText && !ALLOWED_IMG.includes(extOf(filePath))) {
+        return res.status(400).json({ error: `path must be an image file: ${filePath}` });
+      }
 
       const infoApi = `https://api.github.com/repos/${config.repo}/contents/${filePath}`;
       const infoRes = await fetch(infoApi, { headers: getAuthHeaders() });
