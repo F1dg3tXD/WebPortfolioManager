@@ -1802,9 +1802,7 @@ function tfEligible(el) {
 function tfRuleFor(data) {
   const scope = editScopeNow();
   const key = currentPageKey();
-  const cands = styleBlocks.filter(
-    (b) => b.type === "rule" && blockMatchesElementData(b, data) && stateSuffixOf(b) === ""
-  );
+  const cands = ownRuleCandidates(data).filter((b) => stateSuffixOf(b) === "");
   if (scope === "all") {
     const shared = cands.find((b) => !isScopedRule(b));
     return shared || createRuleFor(data, null, "");
@@ -2381,6 +2379,52 @@ function getMatchPriority(block, data) {
   return 2;
 }
 
+// The class an element is styled "by itself" for. Elements like
+// class="top-nav-btn top-nav-btn--active" combine a base class with a BEM
+// --modifier; prefer the modifier so the active and inactive states of the
+// same control get independent colors instead of always editing the shared
+// base rule. Falls back to the normal primary selector otherwise.
+function classTargetOf(data) {
+  if (!data) return null;
+  if (data.id) return data.primary || null;
+  if (!Array.isArray(data.classes) || !data.classes.length) return data.primary || null;
+  const modifier = data.classes.find((c) => c.includes("--"));
+  return modifier ? "." + modifier : (data.primary || "." + data.classes[0]);
+}
+
+// Rank a matching rule for an element, preferring the rule that targets the
+// element's own variant class (e.g. .top-nav-btn--active) over the shared
+// base rule (.top-nav-btn), so edits land on the right rule in each state.
+function getMatchRank(block, data) {
+  const target = classTargetOf(data);
+  if (target && target !== data.primary) {
+    const { classes } = selectorTokens(block.prelude);
+    if (classes.size === 1 && classes.has(target)) return -1;
+  }
+  return getMatchPriority(block, data);
+}
+
+// Rules matching an element, best-first (the element's own variant-class rule
+// first, then exact primary rules, then looser matches).
+function rankedMatches(data) {
+  return styleBlocks
+    .filter((b) => b.type === "rule" && blockMatchesElementData(b, data))
+    .map((b) => ({ b, rank: getMatchRank(b, data) }))
+    .sort((a, z) => a.rank - z.rank)
+    .map((x) => x.b);
+}
+
+// For elements with a variant class (e.g. .top-nav-btn--active) only rules
+// that actually target that class count as "owned" by the element, so edits
+// land on .top-nav-btn--active (or .top-nav-btn--active:hover) instead of the
+// shared .top-nav-btn base. Elements without a variant class own every rule
+// they match (current behavior).
+function ownRuleCandidates(data) {
+  const target = classTargetOf(data);
+  if (!target || target === data.primary) return rankedMatches(data);
+  return rankedMatches(data).filter((b) => selectorTokens(b.prelude).classes.has(target));
+}
+
 function populateAttachSelect(selectedValue) {
   const sel = document.getElementById("attachSelect");
   sel.innerHTML = "";
@@ -2403,19 +2447,12 @@ function populateAttachSelect(selectedValue) {
 }
 
 function findMatchBlock(data) {
-  let best = null, bestP = Infinity;
-  for (const b of styleBlocks) {
-    if (b.type !== "rule") continue;
-    if (blockMatchesElementData(b, data)) {
-      const p = getMatchPriority(b, data);
-      if (p < bestP) { best = b; bestP = p; }
-    }
-  }
-  return best;
+  const best = rankedMatches(data)[0];
+  return best || null;
 }
 
 function createRuleFor(data, pageKey, pseudo) {
-  const sel = (data.primary || "body") + (pseudo || "");
+  const sel = (classTargetOf(data) || data.primary || "body") + (pseudo || "");
   const prelude = pageKey ? pageSelector(pageKey, sel) : sel;
   const block = { type: "rule", prelude, inner: "\n", raw: "", edited: true, decls: [], __justCreated: true };
   styleBlocks.push(block);
@@ -2429,14 +2466,14 @@ function createRuleFor(data, pageKey, pseudo) {
 // caller falls back to the computed style / best-match rule.
 function findEditableBlock(data, scope, pseudo) {
   const key = currentPageKey();
-  const cands = styleBlocks.filter((b) => b.type === "rule" && blockMatchesElementData(b, data));
+  const cands = ownRuleCandidates(data);
   const wantScope = (b) =>
     scope === "all" ? !isScopedRule(b) : isScopedRule(b) && pageScopeOfRule(b) === key;
   const samePseudo = (b) => stateSuffixOf(b) === pseudo;
   let hit = cands.find((b) => wantScope(b) && samePseudo(b));
   if (hit) return hit;
   if (!pseudo) return null;
-  return cands.find((b) => b.type === "rule" && samePseudo(b)) || null;
+  return cands.find((b) => samePseudo(b)) || null;
 }
 
 // Returns the rule a visual edit should write to, honoring the inspector's
@@ -2448,7 +2485,7 @@ function ruleToEdit(data) {
   const scope = editScopeNow();
   const key = currentPageKey();
   const pseudo = statePseudoOf(editStatePref);
-  const candidates = styleBlocks.filter((b) => b.type === "rule" && blockMatchesElementData(b, data));
+  const candidates = ownRuleCandidates(data);
   const wantPseudo = (b) => stateSuffixOf(b) === pseudo;
   if (scope === "all") {
     const global = candidates.find((b) => !isScopedRule(b) && wantPseudo(b));
@@ -3287,7 +3324,7 @@ function buildVisualControls(data) {
 function renderInspectorMatches(data) {
   const matches = styleBlocks
     .filter((b) => blockMatchesElementData(b, data))
-    .sort((a, b) => getMatchPriority(a, data) - getMatchPriority(b, data));
+    .sort((a, b) => getMatchRank(a, data) - getMatchRank(b, data));
 
   const matchBox = document.getElementById("inspectorMatches");
   if (!matchBox) return;

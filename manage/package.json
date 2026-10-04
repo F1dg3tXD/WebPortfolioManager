@@ -1,6 +1,6 @@
 {
   "name": "manage",
-  "version": "0.0.8b",
+  "version": "0.0.9a",
   "private": true,
   "type": "module",
   "scripts": {
