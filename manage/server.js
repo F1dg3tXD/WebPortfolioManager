@@ -1185,14 +1185,7 @@ function expandEntries(entries) {
 
 function mergeProjects(cacheEntries, projects) {
   const existingById = buildIdLookup(cacheEntries);
-  const merged = [];
-  const seenIds = new Set();
-  for (const entry of cacheEntries) {
-    if (entry.id && !seenIds.has(entry.id)) {
-      merged.push(entry);
-      seenIds.add(entry.id);
-    }
-  }
+  const merged = [...cacheEntries];
 
   let added = 0;
   let updated = 0;
