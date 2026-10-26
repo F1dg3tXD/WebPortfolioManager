@@ -246,7 +246,8 @@ app.get("/api/style/elements", async (req, res) => {
       "home/index.html",
       "about/index.html",
       "personal/index.html",
-      "game-art/index.html",
+      "gameart/index.html",
+      "gameart/about/index.html",
     ];
 
     const classes = new Set();

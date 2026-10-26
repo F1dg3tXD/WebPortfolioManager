@@ -214,6 +214,22 @@ body {
   white-space: nowrap;
 }
 
+.card-tab {
+  align-self: flex-start;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9de6ff;
+  background: rgba(9, 144, 247, 0.12);
+  border: 1px solid rgba(9, 144, 247, 0.25);
+  border-radius: 999px;
+  padding: 2px 7px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .card-edit-btn {
   font-size: 10px;
   padding: 3px 8px;
@@ -427,6 +443,61 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent-soft);
   background: #101010;
+}
+
+.tab-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tab-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab-editor-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.tab-editor-remove {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tab-editor-remove:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(255, 92, 92, 0.08);
+}
+
+.tab-editor-add {
+  align-self: flex-start;
+  padding: 5px 12px;
+  font-size: 11px;
+}
+
+.tab-editor-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 0;
+}
+
+.tab-editor-note {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.7;
+  line-height: 1.4;
 }
 
 .row.inline {

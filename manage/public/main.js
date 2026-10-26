@@ -4,6 +4,7 @@ let currentEditId = "";
 let dirty = false;
 let clipboard = null;
 let contextMenuTargetIdx = -1;
+let proTabsDraft = [];
 
 const CATEGORY_MAP = {
   "personal-2d": { type: "personal", is3D: false, isAvatar: false },
@@ -71,6 +72,137 @@ function getCategory(entry) {
   return `${entry.type || "personal"}-${dim}`;
 }
 
+function slugifyTabName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normalizeProfessionalTabs(rawTabs) {
+  const tabs = [];
+  const ids = new Set();
+  for (const raw of Array.isArray(rawTabs) ? rawTabs : []) {
+    let id = "";
+    let name = "";
+    if (typeof raw === "string") {
+      name = raw.trim();
+      id = slugifyTabName(name);
+    } else if (raw) {
+      name = String(raw.name || raw.id || "").trim();
+      id = String(raw.id || slugifyTabName(name)).trim();
+    }
+    if (!name) continue;
+    if (!id) id = slugifyTabName(name) || "tab";
+    let unique = id;
+    let n = 2;
+    while (ids.has(unique)) unique = `${id}-${n++}`;
+    ids.add(unique);
+    tabs.push({ id: unique, name });
+  }
+  return tabs;
+}
+
+function professionalTabsFromConfig() {
+  return normalizeProfessionalTabs((siteConfig && siteConfig.professional && siteConfig.professional.tabs) || []);
+}
+
+function professionalTabName(id) {
+  if (!id) return "";
+  const tab = professionalTabsFromConfig().find((t) => t.id === id || t.name === id);
+  return tab ? tab.name : id;
+}
+
+function populateEditGameArtTab(selected) {
+  const sel = document.getElementById("editGameArtTab");
+  if (!sel) return;
+  const tabs = professionalTabsFromConfig();
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "Unassigned (Other Work)";
+  sel.appendChild(none);
+  for (const tab of tabs) {
+    const opt = document.createElement("option");
+    opt.value = tab.id;
+    opt.textContent = tab.name;
+    sel.appendChild(opt);
+  }
+  const match = tabs.find((t) => t.id === selected || t.name === selected);
+  sel.value = match ? match.id : "";
+}
+
+function updateEditGameArtTabVisibility() {
+  const row = document.getElementById("editGameArtTabRow");
+  if (!row) return;
+  const activeType = document.querySelector('#editForm .toggle-group[data-group="section"] .toggle.active');
+  const isProfessional = !!(activeType && activeType.dataset.value === "professional");
+  row.style.display = isProfessional ? "" : "none";
+}
+
+function renderProTabEditor() {
+  const box = document.getElementById("scGameArtTabs");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!proTabsDraft.length) {
+    const empty = document.createElement("div");
+    empty.className = "tab-editor-empty";
+    empty.textContent = "No tabs yet. Add one to group professional work.";
+    box.appendChild(empty);
+    return;
+  }
+  proTabsDraft.forEach((tab, idx) => {
+    const row = document.createElement("div");
+    row.className = "tab-editor-row";
+    row.dataset.tabId = tab.id;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "text-input tab-editor-input";
+    input.value = tab.name;
+    input.placeholder = "Tab name";
+    input.addEventListener("input", () => {
+      tab.name = input.value;
+    });
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "tab-editor-remove";
+    del.title = "Remove this tab";
+    del.textContent = "×";
+    del.addEventListener("click", () => {
+      proTabsDraft.splice(idx, 1);
+      renderProTabEditor();
+    });
+
+    row.appendChild(input);
+    row.appendChild(del);
+    box.appendChild(row);
+  });
+}
+
+function addProTab() {
+  const ids = new Set(proTabsDraft.map((t) => t.id));
+  let id = "new-tab";
+  let n = 2;
+  while (ids.has(id)) id = `new-tab-${n++}`;
+  proTabsDraft.push({ id, name: "New Tab" });
+  renderProTabEditor();
+  const inputs = document.querySelectorAll("#scGameArtTabs .tab-editor-input");
+  const last = inputs[inputs.length - 1];
+  if (last) {
+    last.focus();
+    last.select();
+  }
+}
+
+function collectProTabs() {
+  return proTabsDraft
+    .map((tab) => ({ id: tab.id, name: String(tab.name || "").trim() }))
+    .filter((tab) => tab.name);
+}
+
 function createCard(entry, idx) {
   const card = document.createElement("div");
   card.className = "card";
@@ -109,6 +241,16 @@ function createCard(entry, idx) {
   });
 
   info.appendChild(title);
+
+  if (entry.type === "professional") {
+    const tabName = professionalTabName(entry.gameArtTab);
+    if (tabName) {
+      const tabRow = document.createElement("div");
+      tabRow.className = "card-tab";
+      tabRow.textContent = tabName;
+      info.appendChild(tabRow);
+    }
+  }
 
   const tags = entry.tags || [];
   if (tags.length) {
@@ -424,8 +566,8 @@ function openEdit(idx, prefill = null) {
 
   document.getElementById("editPanelTitle").textContent = isNew ? "New Entry" : "Edit Details";
 
-  const workTypeToggles = document.querySelectorAll("#editForm .toggle-group:first-of-type .toggle");
-  const dimToggles = document.querySelectorAll("#editForm .toggle-group:last-of-type .toggle");
+  const workTypeToggles = document.querySelectorAll('#editForm .toggle-group[data-group="section"] .toggle');
+  const dimToggles = document.querySelectorAll('#editForm .toggle-group[data-group="dimension"] .toggle');
 
   if (isNew) {
     document.getElementById("editTitle").value = "";
@@ -492,6 +634,8 @@ function openEdit(idx, prefill = null) {
   }
 
   document.getElementById("overlay").style.display = "flex";
+  updateEditGameArtTabVisibility();
+  populateEditGameArtTab(isNew ? ((prefill && prefill.gameArtTab) || "") : ((entry && entry.gameArtTab) || ""));
   loadCropPreview();
 }
 
@@ -504,8 +648,8 @@ function closeEdit() {
 function saveEdit() {
   const isNew = currentEditIdx < 0 || currentEditIdx >= artData.length;
 
-  const activeType = document.querySelector("#editForm .toggle-group:first-of-type .toggle.active");
-  const activeDim = document.querySelector("#editForm .toggle-group:last-of-type .toggle.active");
+  const activeType = document.querySelector('#editForm .toggle-group[data-group="section"] .toggle.active');
+  const activeDim = document.querySelector('#editForm .toggle-group[data-group="dimension"] .toggle.active');
   const type = activeType ? activeType.dataset.value : "personal";
   const is3D = activeDim ? activeDim.dataset.value === "true" : false;
 
@@ -537,8 +681,14 @@ function saveEdit() {
     .map((t) => t.trim())
     .filter((t) => t);
 
+  const gameArtTab = type === "professional"
+    ? document.getElementById("editGameArtTab").value
+    : "";
+
   if (isNew) {
-    artData.push({ id: currentEditId || undefined, type, is3D, isAvatar, title, description, tags, sourceLink, images, embed, thumbnail, thumbnailCrop });
+    const entry = { id: currentEditId || undefined, type, is3D, isAvatar, title, description, tags, sourceLink, images, embed, thumbnail, thumbnailCrop };
+    if (gameArtTab) entry.gameArtTab = gameArtTab;
+    artData.push(entry);
   } else {
     const entry = artData[currentEditIdx];
     entry.type = type;
@@ -552,6 +702,8 @@ function saveEdit() {
     entry.embed = embed;
     entry.thumbnail = thumbnail || "";
     entry.thumbnailCrop = thumbnailCrop;
+    if (gameArtTab) entry.gameArtTab = gameArtTab;
+    else delete entry.gameArtTab;
   }
 
   dirty = true;
@@ -796,6 +948,18 @@ function openSiteConfig() {
   document.getElementById("scSocialsFooter").value = (sp.footerContacts || [])
     .map(c => `${c.label}: ${c.url}`).join("\n");
 
+  const pro = (siteConfig && siteConfig.professional) || {};
+  document.getElementById("scProName").value = pro.name || "";
+  document.getElementById("scProHeadline").value = pro.headline || "";
+  document.getElementById("scProBio").value = pro.bio || "";
+  document.getElementById("scProImage").value = pro.image || "";
+  document.getElementById("scProAboutTitle").value = pro.aboutTitle || "";
+  document.getElementById("scProAboutBio").value = pro.aboutBio || "";
+  document.getElementById("scProContacts").value = (pro.contacts || [])
+    .map(c => `${c.label}: ${c.url}`).join("\n");
+  proTabsDraft = normalizeProfessionalTabs(pro.tabs);
+  renderProTabEditor();
+
   document.getElementById("siteConfigOverlay").style.display = "flex";
 }
 
@@ -842,6 +1006,12 @@ async function saveSiteConfig() {
     return idx === -1 ? null : { label: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
   }).filter(Boolean);
 
+  const rawProContacts = document.getElementById("scProContacts").value.split("\n").filter(l => l.trim());
+  const proContacts = rawProContacts.map(line => {
+    const idx = line.indexOf(":");
+    return idx === -1 ? null : { label: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+  }).filter(Boolean);
+
   const data = {
     personal: {
       bio: document.getElementById("scBio").value.trim(),
@@ -862,7 +1032,17 @@ async function saveSiteConfig() {
     site: {
       pfpImage: document.getElementById("scPfpImage").value.trim() || "/personal/pfp.png",
     },
-    professional: (siteConfig && siteConfig.professional) || { bio: "", contacts: [] },
+    professional: {
+      ...((siteConfig && siteConfig.professional) || {}),
+      name: document.getElementById("scProName").value.trim(),
+      headline: document.getElementById("scProHeadline").value.trim(),
+      bio: document.getElementById("scProBio").value.trim(),
+      image: document.getElementById("scProImage").value.trim(),
+      aboutTitle: document.getElementById("scProAboutTitle").value.trim(),
+      aboutBio: document.getElementById("scProAboutBio").value.trim(),
+      contacts: proContacts,
+      tabs: collectProTabs(),
+    },
   };
 
   const res = await fetch("/api/siteconfig", {
@@ -1054,7 +1234,7 @@ const PAGES = [
   { key: "home", path: "home/index.html", label: "Home" },
   { key: "about", path: "about/index.html", label: "About" },
   { key: "personal", path: "personal/index.html", label: "Personal" },
-  { key: "game-art", path: "game-art/index.html", label: "Game Art" },
+  { key: "game-art", path: "gameart/index.html", label: "Game Art" },
 ];
 
 let editScopePref = "page"; // "page" = this page only | "all" = all pages
@@ -4059,7 +4239,8 @@ const MOBILE_PAGES = [
   ["Home", "home/index.html"],
   ["About", "about/index.html"],
   ["Portfolio", "personal/index.html"],
-  ["Game Art", "game-art/index.html"],
+  ["Game Art", "gameart/index.html"],
+  ["Game Art About", "gameart/about/index.html"],
 ];
 
 async function loadMobileUrl() {
@@ -5124,6 +5305,10 @@ async function init() {
     });
   });
 
+  document.querySelectorAll('#editForm .toggle-group[data-group="section"] .toggle').forEach((btn) => {
+    btn.addEventListener("click", updateEditGameArtTabVisibility);
+  });
+
   document.getElementById("addBtn").addEventListener("click", (e) => {
     e.stopPropagation();
     const menu = document.getElementById("addMenu");
@@ -5267,6 +5452,7 @@ async function init() {
   });
 
   document.getElementById("siteConfigBtn").addEventListener("click", openSiteConfig);
+  document.getElementById("scAddTabBtn").addEventListener("click", addProTab);
   document.getElementById("scOverlayBg").addEventListener("click", closeSiteConfig);
   document.getElementById("scCloseBtn").addEventListener("click", closeSiteConfig);
   document.getElementById("scSaveBtn").addEventListener("click", async () => {

@@ -68,7 +68,7 @@
               <option value="home/index.html">Home</option>
               <option value="about/index.html">About</option>
               <option value="personal/index.html">Portfolio</option>
-              <option value="game-art/index.html">Game Art</option>
+              <option value="gameart/index.html">Game Art</option>
             </select>
             <button id="pasteHtmlBtn" class="secondary-btn">Paste HTML</button>
             <button id="styleValuesBtn" class="secondary-btn" title="Show exact numbers">Values</button>
@@ -346,6 +346,36 @@
 
         <hr class="divider" />
 
+        <div class="field-label">Professional / Game Art</div>
+
+        <label class="field-label">Real / Display Name <span class="field-note">shown on Game Art pages</span></label>
+        <input id="scProName" type="text" class="text-input" placeholder="Your name" />
+
+        <label class="field-label">Headline <span class="field-note">short title under the name</span></label>
+        <input id="scProHeadline" type="text" class="text-input" placeholder="Game Artist & 3D Modeler" />
+
+        <label class="field-label">Professional Bio <span class="field-note">short bio for the professional side</span></label>
+        <textarea id="scProBio" class="text-input textarea" rows="3"></textarea>
+
+        <label class="field-label">Professional Image <span class="field-note">portrait or about image URL</span></label>
+        <input id="scProImage" type="url" class="text-input" placeholder="/personal/pfp.png" />
+
+        <label class="field-label">Recruiter About Title</label>
+        <input id="scProAboutTitle" type="text" class="text-input" placeholder="About the Artist" />
+
+        <label class="field-label">Recruiter About Bio <span class="field-note">Markdown supported</span></label>
+        <textarea id="scProAboutBio" class="text-input textarea" rows="6"></textarea>
+
+        <label class="field-label">Professional Contacts <span class="field-note">one per line: label: url</span></label>
+        <textarea id="scProContacts" class="text-input textarea" rows="3"></textarea>
+
+        <label class="field-label">Game Art Tabs <span class="field-note">public tabs shown on the Game Art page</span></label>
+        <div class="tab-editor" id="scGameArtTabs"></div>
+        <button type="button" id="scAddTabBtn" class="secondary-btn tab-editor-add">+ Add Tab</button>
+        <div class="field-note tab-editor-note">Rename a tab by editing its text. Artwork keeps its tab when a tab is renamed.</div>
+
+        <hr class="divider" />
+
         <label class="field-label">About Image <span class="field-note">about page image URL</span></label>
         <input id="scAboutImage" type="url" class="text-input" placeholder="/personal/pfp.png" />
 
@@ -377,7 +407,7 @@
       <form id="editForm" class="edit-form">
         <section class="row">
           <label class="field-label">Section</label>
-          <div class="toggle-group" role="radiogroup">
+          <div class="toggle-group" role="radiogroup" data-group="section">
             <button type="button" class="toggle active" data-value="personal">Personal</button>
             <button type="button" class="toggle" data-value="professional">Professional</button>
           </div>
@@ -385,10 +415,15 @@
 
         <section class="row">
           <label class="field-label">Dimension</label>
-          <div class="toggle-group" role="radiogroup">
+          <div class="toggle-group" role="radiogroup" data-group="dimension">
             <button type="button" class="toggle active" data-value="false">2D</button>
             <button type="button" class="toggle" data-value="true">3D</button>
           </div>
+        </section>
+
+        <section class="row" id="editGameArtTabRow">
+          <label class="field-label">Game Art Tab <span class="field-note">grouping on the professional page</span></label>
+          <select id="editGameArtTab" class="text-input"></select>
         </section>
 
         <section class="row inline" style="margin-top:8px">
